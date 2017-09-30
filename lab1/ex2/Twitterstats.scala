@@ -73,14 +73,18 @@ object Twitterstats
 		System.setProperty("twitter4j.oauth.accessToken", accessToken)
 		System.setProperty("twitter4j.oauth.accessTokenSecret", accessTokenSecret)
 
-		val sparkConf = new SparkConf().setAppName("TwitterPopularTags")
+		val sparkConf = new SparkConf().setAppName("TwitterPopularTags").setMaster("local")
 
 		val ssc = new StreamingContext(sparkConf, Seconds(2))
 		val stream = TwitterUtils.createStream(ssc, None)
-		val retweetedStatuses = stream.filter(status => status.isRetweet)
+
+		
+		val englishStatuses = stream.filter(status => status.getLang == "en" || status.getLang == "no")
+		val englishStatusesReformatted = englishStatuses.map(x=> (x.getId,(x.getUser.getName,x.getText)))
+		val retweetedStatuses = englishStatuses.filter(status => status.isRetweet).map(x=> (x.getId,(x.getUser.getName,x.getText)))
 		// Insert your code here
 
-		stream.foreachRDD(rdd=>rdd.foreach(x=>println(x)))
+		englishStatuses.foreachRDD(rdd=>rdd.foreach(x=>println()))
 
 
 
