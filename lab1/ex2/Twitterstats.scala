@@ -78,8 +78,9 @@ object Twitterstats
 		val sparkConf = new SparkConf().setAppName("TwitterPopularTags").setMaster("local[8]")
 
 		val ssc = new StreamingContext(sparkConf, Seconds(2))
+		//Set up the input stream
 		val stream = TwitterUtils.createStream(ssc, None)
-
+		//Set up the windowing.
 		val wStream = stream.window(Seconds(120), Seconds(10))
 		// Insert your code here
 		//Filter the tweets on language
@@ -105,7 +106,7 @@ object Twitterstats
 			case (id,(((username,text,hashtags),Some(retweetcount)),Some((hashtag,hashtagcount)))) => (id,(hashtagcount,hashtag,username,retweetcount,text)) //keep tweets with non-unique hashtags regardless of retweets
 			case (id,(((username,text,hashtags),None),None)) => (id,(0,"None",username,0,text)) //keep tweets without hashtags
 			case (id,(((username,text,hashtags),Some(retweetcount)),None)) => (id,(0,"None",username,retweetcount,text)) //keep tweets without hashtags			
-		}).filter(x=>x._2._1!=1).transform(rdd=>rdd.sortBy(x=>x._2._2,true).sortBy(x=>x._2._1,false))
+		}).filter(x=> x._2._1!=1 || x._2._4>0 ).transform(rdd=>rdd.sortBy(x=>x._2._2,true).sortBy(x=>x._2._1,false))
 		
 		
 		var rowNumber:Int = 0;
