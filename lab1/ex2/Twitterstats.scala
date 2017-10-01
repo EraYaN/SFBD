@@ -86,7 +86,7 @@ object Twitterstats
 		//Filter the tweets on language
 		val englishStream = wStream.filter(status => status.getLang == "en" || status.getLang == "no")
 		// Filter all the non retweet tweets and reformat.
-		val englishStatuses = englishStream.filter(status => !status.isRetweet).map(x=> (x.getId,(x.getUser.getName,x.getText,x.getHashtagEntities.map(x=>x.getText))))
+		val englishStatuses = englishStream.filter(status => !status.isRetweet).map(x=> (x.getId,(x.getUser.getName,x.getText,x.getHashtagEntities.map(x=>x.getText.toLowerCase))))
 		// Get tweets with hashtags and turn the pairs around
 		val englishStatusesHashtags = englishStatuses.filter(x=> !x._2._3.isEmpty).map(x=> (x._2._3(0),x._1))
 		// Get all retweets and reformat the tuples
@@ -100,13 +100,13 @@ object Twitterstats
 		// Add the global hashtag info to all tweets.
 		val englishStatusesHashtagsCounts = englishStatusesHashtags.join(globalHashtags).map(x=>(x._2._1, (x._1,x._2._2)))
 
-		// Reformat the tuples and filter out all unique hashtag containing tweets plus sort by popular hashtags.
+		// Reformat the tuples and filter out all unique hashtag containing tweets plus sort by popular hashtags, and add the original tweet to the retweet count.
 		val countedRetweets = englishStatuses.leftOuterJoin(retweetCounts).leftOuterJoin(englishStatusesHashtagsCounts).map({
-			case (id,(((username,text,hashtags),None),Some((hashtag,hashtagcount)))) => (id,(hashtagcount,hashtag,username,0,text)) //keep tweets with non-unique hashtags regardless of retweets
-			case (id,(((username,text,hashtags),Some(retweetcount)),Some((hashtag,hashtagcount)))) => (id,(hashtagcount,hashtag,username,retweetcount,text)) //keep tweets with non-unique hashtags regardless of retweets
-			case (id,(((username,text,hashtags),None),None)) => (id,(0,"None",username,0,text)) //keep tweets without hashtags
-			case (id,(((username,text,hashtags),Some(retweetcount)),None)) => (id,(0,"None",username,retweetcount,text)) //keep tweets without hashtags			
-		}).filter(x=> x._2._1!=1 || x._2._4>0 ).transform(rdd=>rdd.sortBy(x=>x._2._2,true).sortBy(x=>x._2._1,false))
+			case (id,(((username,text,hashtags),None),Some((hashtag,hashtagcount)))) => (id,(hashtagcount,hashtag,username,1,text)) //keep tweets with non-unique hashtags regardless of retweets
+			case (id,(((username,text,hashtags),Some(retweetcount)),Some((hashtag,hashtagcount)))) => (id,(hashtagcount,hashtag,username,retweetcount+1,text)) //keep tweets with non-unique hashtags regardless of retweets
+			case (id,(((username,text,hashtags),None),None)) => (id,(0,"None",username,1,text)) //keep tweets without hashtags
+			case (id,(((username,text,hashtags),Some(retweetcount)),None)) => (id,(0,"None",username,retweetcount+1,text)) //keep tweets without hashtags			
+		}).filter(x=> x._2._1!=1 || x._2._4>1 ).transform(rdd=>rdd.sortBy(x=>x._2._2,true).sortBy(x=>x._2._1,false))
 		
 		
 		var rowNumber:Int = 0;
