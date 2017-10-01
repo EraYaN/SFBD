@@ -4,7 +4,8 @@ import org.apache.spark.SparkContext._
 import org.apache.spark.streaming._
 import org.apache.spark.streaming.twitter._
 import org.apache.spark.streaming.StreamingContext._
-import java.io._
+import java.io.{File}
+import java.nio.file.{Files,Paths,StandardOpenOption}
 import java.util.Locale
 import java.text._
 import java.net._
@@ -48,15 +49,7 @@ object Twitterstats
 	{
 		return new Locale(code).getDisplayLanguage(Locale.ENGLISH)
 	}
-	
-  def returnFirstString(a: Array[String]): Option[String] = {
-    if (a.isEmpty) {
-      None
-    }
-    else {
-      Some("#"+a(0))
-    }
-  }
+
 
 	def main(args: Array[String])
 	{
@@ -95,44 +88,75 @@ object Twitterstats
 		val englishStatuses = englishStream.filter(status => !status.isRetweet).map(x=> (x.getId,(x.getUser.getName,x.getText,x.getHashtagEntities.map(x=>x.getText))))
 		// Get tweets with hashtags and turn the pairs around
 		val englishStatusesHashtags = englishStatuses.filter(x=> !x._2._3.isEmpty).map(x=> (x._2._3(0),x._1))
+		// Get all retweets and reformat the tuples
 		val retweetedStatuses = englishStream.filter(status => status.isRetweet).map(x=> (x.getRetweetedStatus.getId,(x.getRetweetedStatus.getUser.getName,x.getRetweetedStatus.getText)))
-		
+		//Count all the retweets for the original tweet ids.
 		val retweetCounts = retweetedStatuses.map(x=> (x._1,1)).reduceByKey(_+_)
+		//Remap hashtags to ids.
 		val hashtags = englishStatuses.map(status=>(status._1,status._2._3))
+		//Count global hashtags and sort them
 		val globalHashtags = hashtags.flatMap(status=>status._2).map(hashtag=>(hashtag,1)).reduceByKey(_+_).transform(x=>x.sortBy(y=>y._2, true))
-
+		// Add the global hashtag info to all tweets.
 		val englishStatusesHashtagsCounts = englishStatusesHashtags.join(globalHashtags).map(x=>(x._2._1, (x._1,x._2._2)))
 
-		//val englishStatusesGCounts = englishStatuses.map(x=> (x._1,(x._2._1,x._2._2,x._2._3.leftOuterJoin(globalHashtags))))
-		//val hashtagsRetweets = hashtags.join(retweetCounts)
-
-		//val englishStatusesHCounts = englishStatuses.map(x=>(x._1,x._2,x._3,x._4.join(globalHashtags)))
-
-		//(914147961235484672,(((Damilola,Happy life #ayoms2017,[Ljava.lang.String;@2fc377),None),Some((ayoms2017,1))))
+		// Reformat the tuples and filter out all unique hashtag containing tweets plus sort by popular hashtags.
 		val countedRetweets = englishStatuses.leftOuterJoin(retweetCounts).leftOuterJoin(englishStatusesHashtagsCounts).map({
-			case (id,(((username,text,hashtags),None),Some((hashtag,1)))) => None //remove tweets with unique hashtag and no retweets
 			case (id,(((username,text,hashtags),None),Some((hashtag,hashtagcount)))) => (id,(hashtagcount,hashtag,username,0,text)) //keep tweets with non-unique hashtags regardless of retweets
 			case (id,(((username,text,hashtags),Some(retweetcount)),Some((hashtag,hashtagcount)))) => (id,(hashtagcount,hashtag,username,retweetcount,text)) //keep tweets with non-unique hashtags regardless of retweets
 			case (id,(((username,text,hashtags),None),None)) => (id,(0,"None",username,0,text)) //keep tweets without hashtags
-			case (id,(((username,text,hashtags),Some(retweetcount)),None)) => (id,(0,"None",username,retweetcount,text)) //keep tweets without hashtags
-			case _ => None
-		})
-		//val countedHashtagRetweets = countedRetweets.join(hashtags)
-		var count = 0;
-		//englishStatuses.foreachRDD(rdd=>rdd.foreach(x=>println()))
-		countedRetweets.foreachRDD({ rdd=>
-			
-			println("==================================================")
-			println("Time: "+Calendar.getInstance().getTime())
-			println("==================================================")
-			count += 1
-			rdd.foreach({
-				x=>		
-					println(x)			
-					//println(count + ". " + "?TODO?" + " " + returnFirstString(x._2._1._3) + ":" + x._2._1._1 + ":" + x._2._2 + " " + x._2._1._2)
-					println("--------------------------------------------------")
+			case (id,(((username,text,hashtags),Some(retweetcount)),None)) => (id,(0,"None",username,retweetcount,text)) //keep tweets without hashtags			
+		}).filter(x=>x._2._1!=1).transform(rdd=>rdd.sortBy(x=>x._2._2,true).sortBy(x=>x._2._1,false))
+		
+		
+		var rowNumber:Int = 0;
 
-			})
+		
+		// Empty file or create it.
+		val createWriter = Files.newBufferedWriter(Paths.get("tweets.txt"))
+		createWriter.close()
+		println("File tweets.txt created or truncated. First results in 10 seconds.")
+		//Print and 
+		countedRetweets.foreachRDD({ rdd=>
+			var rddRowNumber: Int = 0;
+			var currentHashtag: String = "";
+			var currentHashtagCount: Int = 0;
+			var printedDots: Boolean = false;
+			val writer = Files.newBufferedWriter(Paths.get("tweets.txt"),StandardOpenOption.APPEND)
+			try	{
+				println("==================================================\n Time: "+Calendar.getInstance().getTime() + "\n==================================================")
+				writer.write("==================================================\n Time: "+Calendar.getInstance().getTime() + "\n==================================================\n")
+				val count = rdd.count()
+				val array = rdd.collect().foreach({
+					x=>		
+						//println(x)	
+						if(currentHashtag == x._2._2) {
+							currentHashtagCount += 1
+						}
+						else {
+							currentHashtag = x._2._2
+							currentHashtagCount = 0
+							printedDots = false
+						}
+						
+						if(currentHashtagCount<3 || x._2._2 == "None"){
+							rowNumber += 1
+							writer.write(rowNumber + ". " + x._2._1 + " " + x._2._2 + ":" + x._2._3 + ":" + x._2._4 + " " + x._2._5 + "\n--------------------------------------------------\n")
+							if(rddRowNumber<10){
+						    	println(rowNumber + ". " + x._2._1 + " " + x._2._2 + ":" + x._2._3 + ":" + x._2._4 + " " + x._2._5 + "\n--------------------------------------------------")
+							}
+							
+						} else if(!printedDots){
+							writer.write("..................................................\n")
+							if(rddRowNumber<10)
+								println("..................................................")	
+							printedDots = true					
+						}
+						rddRowNumber += 1
+
+				})
+			} 
+			finally
+				writer.close()
 		})
 		//hashtags.foreachRDD(rdd=>rdd.foreach(x=>println(x._1 + "; Hashtags: " + x._2.mkString(", "))))
 		//hashtagsRetweets.foreachRDD(rdd=>rdd.foreach(x=>println(x._1 + "; Retweets: " + x._2._2 + "; Hashtags: " + x._2._1.mkString(", "))))
