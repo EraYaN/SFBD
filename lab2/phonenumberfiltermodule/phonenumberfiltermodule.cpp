@@ -13,7 +13,7 @@ static PyObject *
 phonenumberfilter_load(PyObject *self, PyObject *args);
 PyMODINIT_FUNC
 PyInit_phonenumberfilter(void);
-static PyObject * read_data(const char* filename, bool usecompression);
+static PyObject * read_data(const char* filename, bool usecompression, bool deletefilewhendone);
 static void process_data(char * data, PyObject* list, size_t size);
 
 #pragma region Python stuff to setup module.
@@ -40,14 +40,15 @@ static PyObject *
 phonenumberfilter_load(PyObject *self, PyObject *args)
 {
     const char *file;
-    const char usecompression = 1;
+    char usecompression = 1;
+    char deletefilewhendone = 0;
 
-    if (!PyArg_ParseTuple(args, "s|b", &file, &usecompression)) {
+    if (!PyArg_ParseTuple(args, "s|pp", &file, &usecompression, &deletefilewhendone)) {
         PyErr_SetString(PhoneNumberFilterError, "Parsing arguments failed.");
         return NULL;
     }
     
-    return read_data(file, usecompression!=0);
+    return read_data(file, usecompression!=0, deletefilewhendone!=0);
         
 }
 
@@ -122,6 +123,11 @@ static bool inline isprefix_3() {
 static bool inline isprefix_4() {
     int key = (current_phone[1] - '0') | ((current_phone[2] - '0') << 4) | ((current_phone[3] - '0') << 8);
     return prefixes_4[key];
+}
+
+static inline bool file_exists(const std::string& name) {
+    struct stat buffer;
+    return (stat(name.c_str(), &buffer) == 0);
 }
 
 static void process_data(char * data, PyObject* out, size_t size) {
@@ -268,22 +274,49 @@ static void process_data(char * data, PyObject* out, size_t size) {
 
     //delete current_url;
 }
-static PyObject * read_data(const char* filename, bool usecompression) {
-    gz::igzstream is(filename);
+static PyObject * read_data(const char* filename, bool usecompression, bool deletefilewhendone) {
+    if(usecompression)
+        std::cout << "Processing compressed file: " << filename << std::endl;
+    else
+        std::cout << "Processing file: " << filename << std::endl;
+    if (!file_exists(filename)) {
+        char errorbuf[1024];
+        snprintf(errorbuf, 1024, "File %s does not exist.", filename);
+        PyErr_SetString(PhoneNumberFilterError, errorbuf);
+        return NULL;
+    }
+    std::istream * is;
+    if (usecompression) {
+        is = new gz::igzstream(filename);
+    }
+    else {
+        is = new std::ifstream(filename);
+    }
 
     if (is) {
         // Determine the file length
         char* buffer = new char[STARTBUFFERSIZE];
         // Load the data
-        is.read(buffer, STARTBUFFERSIZE);
-        size_t size = is.gcount();
+        is->read(buffer, STARTBUFFERSIZE);
+        size_t size = is->gcount();
 
         reset_all();
         PyObject *list = PyList_New(0);
         process_data(buffer, list, size);
 
         delete[] buffer;
-
+        delete is;
+        if (deletefilewhendone) {
+            if (remove(filename) != 0) {
+                std::cout << "Could not remove file " << filename << " after processing." << std::endl;
+            }
+            else {
+                std::cout << "Removed file " << filename << " after processing." << std::endl;
+            }
+        }
+        else {
+            std::cout << "Leaving file " << filename << " after processing." << std::endl;
+        }
         return list;
     }
     else {

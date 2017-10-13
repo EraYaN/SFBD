@@ -12,7 +12,7 @@
     <Name>phone_number_analysis</Name>
     <RootNamespace>phone_number_analysis</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>--input .\input\test_wet-uncompressed.txt --output phonenumbers_out --partitions 8</CommandLineArguments>
+    <CommandLineArguments>--input .\input\test_s3_wet.txt --output phonenumbers_out --partitions 8</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
     <IsWindowsApplication>False</IsWindowsApplication>
   </PropertyGroup>

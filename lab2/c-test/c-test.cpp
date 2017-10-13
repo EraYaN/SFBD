@@ -3,6 +3,7 @@
 #include "timing.h"
 #include <string>
 #include <memory>
+#include <sys/stat.h>
 #include "prefixes.h"
 #define GZSTREAM_NAMESPACE gz
 #include "gzstream.h"
@@ -57,6 +58,11 @@ static bool inline isprefix_3() {
 static bool inline isprefix_4() {
     int key = (current_phone[1] - '0') | ((current_phone[2] - '0') << 4) | ((current_phone[3] - '0') << 8);
     return prefixes_4[key];
+}
+
+static inline bool file_exists(const std::string& name) {
+    struct stat buffer;
+    return (stat(name.c_str(), &buffer) == 0);
 }
 
 static void process_data(char * data, std::ofstream* out, size_t size) {
@@ -213,7 +219,11 @@ int main() {
     double processingtime = 0;
     double cleanuptime = 0;
     size_t total_size = 0;
-    
+    if (!file_exists(segmentfile)) {
+        std::cerr << "Segment file " << segmentfile << " does not exist." << std::endl;
+        std::cin.get();
+        return 1;
+    }
     std::cout << "Starting..." << std::endl;
     std::ofstream outfile(outfilename);
     std::ifstream file(segmentfile);
@@ -231,13 +241,16 @@ int main() {
             std::cout << "Processing file " << filename.substr(index) << std::endl;
             // Process str   
             perftime_t t0, t1, t2, t3, t4;
-            
+            if (!file_exists(filename.substr(index))) {
+                std::cerr << "File " << filename.substr(index)<< " does not exist." << std::endl;
+                continue;
+            }
             t0 = now();
             
             //std::unique_ptr<std::istream> is = std::unique_ptr< std::istream >(new zstr::ifstream(filename.substr(index)));
             gz::igzstream is(filename.substr(index).c_str());
             //is->exceptions(std::ios_base::badbit);
-            if (is)
+            if (is.good())
             {
                 // Determine the file length
                 //is.seekg(0, std::ios_base::end);
@@ -285,7 +298,7 @@ int main() {
                 total_size += size;
             }
             else {
-                std::cout << "File could not be opened." << std::endl;
+                std::cerr << "File " << filename.substr(index).c_str() << " could not be opened." << std::endl;
             }
         }
 
@@ -306,7 +319,7 @@ int main() {
         //delete[] buff;
     }
     else {
-        std::cout << "Could not open segment file." << std::endl;
+        std::cerr << "Could not open segment file." << std::endl;
     }    
     std::cin.get();
 
