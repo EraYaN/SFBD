@@ -23,4 +23,5 @@ else:
 setup (name='PhoneNumberFilter',
        version='1.1',
        description='This is a package to quickly filter dutch phone numbers from a WARC WET file, now with compression support.',
+       zip_safe=False,
        ext_modules=[module1])
