@@ -87,8 +87,8 @@ class PhoneNumbers:
         if input_uri.startswith('file:'):
             res = self.process_records_new(input_uri[5:], False)
             t_end = time.time()
-            print("##Download: {};{:.3f}".format(input_uri[5:],0))  
-            print("##Process: {};{:.3f}".format(input_uri[5:],t_end-t_start)) 
+            print("##Download: {0};{1:.3f}".format(input_uri[5:],0))  
+            print("##Process: {0};{1:.3f}".format(input_uri[5:],t_end-t_start)) 
             
             return res
         elif input_uri.startswith('s3:/'):
@@ -99,8 +99,8 @@ class PhoneNumbers:
             t_mid = time.time()
             res = self.process_records_new(tempname, True)   
             t_end = time.time()
-            print("##Download: {};{:.3f}".format(path,t_mid-t_start))    
-            print("##Process: {};{:.3f}".format(path,t_end-t_mid)) 
+            print("##Download: {0};{1:.3f}".format(path,t_mid-t_start))    
+            print("##Process: {0};{1:.3f}".format(path,t_end-t_mid)) 
         else:
             return []
         return self.process_records(stream)

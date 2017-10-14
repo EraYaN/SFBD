@@ -21,6 +21,6 @@ else:
                     library_dirs=[])
 
 setup (name='PhoneNumberFilter',
-       version='1.1',
+       version='1.2',
        description='This is a package to quickly filter dutch phone numbers from a WARC WET file, now with compression support.',
        ext_modules=[module1])

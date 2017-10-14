@@ -11,7 +11,7 @@
 #define HEADER_MATCH "WARC-Target-URI:"
 #define HEADER_MATCH_SIZE 16
 #define STARTBUFFERSIZE 400000000
-#define URLBUFFERSIZE 4096
+#define URLBUFFERSIZE 8192
 #define PHONENUMBERBUFFERSIZE 64
 
 char current_url[URLBUFFERSIZE];
@@ -211,7 +211,7 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
 int main() {
 
     //const char* segmentfile = "C:\\commoncrawl\\SBD-Lab2\\input\\custom_test-uncompressed.txt";
-    const char* segmentfile = "C:\\commoncrawl\\SBD-Lab2\\input\\test_wet.txt";
+    const char* segmentfile = "C:\\commoncrawl\\SBD-Lab2\\input\\test_wet_long.txt";
     const char* outfilename = "C:\\commoncrawl\\SBD-Lab2\\output_c-test.txt";
     double inittime = 0;
     double readingtime = 0;
