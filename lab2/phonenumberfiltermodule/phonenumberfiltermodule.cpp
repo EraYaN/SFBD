@@ -275,10 +275,10 @@ static void process_data(char * data, PyObject* out, size_t size) {
     //delete current_url;
 }
 static PyObject * read_data(const char* filename, bool usecompression, bool deletefilewhendone) {
-    if(usecompression)
+    /*if(usecompression)
         std::cout << "Processing compressed file: " << filename << std::endl;
     else
-        std::cout << "Processing file: " << filename << std::endl;
+        std::cout << "Processing file: " << filename << std::endl;*/
     if (!file_exists(filename)) {
         char errorbuf[1024];
         snprintf(errorbuf, 1024, "File %s does not exist.", filename);
@@ -308,14 +308,14 @@ static PyObject * read_data(const char* filename, bool usecompression, bool dele
         delete is;
         if (deletefilewhendone) {
             if (remove(filename) != 0) {
-                std::cout << "Could not remove file " << filename << " after processing." << std::endl;
+                //std::cout << "Could not remove file " << filename << " after processing." << std::endl;
             }
             else {
-                std::cout << "Removed file " << filename << " after processing." << std::endl;
+                //std::cout << "Removed file " << filename << " after processing." << std::endl;
             }
         }
         else {
-            std::cout << "Leaving file " << filename << " after processing." << std::endl;
+            //std::cout << "Leaving file " << filename << " after processing." << std::endl;
         }
         return list;
     }

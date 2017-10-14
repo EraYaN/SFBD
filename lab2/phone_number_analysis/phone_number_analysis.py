@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 
-from warcio.archiveiterator import ArchiveIterator
-from warcio.recordloader import ArchiveLoadFailed
-
 from tempfile import TemporaryFile, NamedTemporaryFile
 
 import argparse
@@ -11,13 +8,8 @@ from pyspark import SparkContext, SparkConf
 from pyspark.sql import SQLContext
 from pyspark.sql.types import StructType, StructField, StringType, ArrayType
 
-import requests
-from requests_file import FileAdapter
-
 import boto3
 import botocore
-
-import re
 
 import os
 
@@ -25,29 +17,33 @@ import time
 
 import phonenumberfilter as pnf
 
-class PhoneNumbers:
-    filt = r"[\(\)\- ]*"
-    mid_zero = "(?:{0}\( *?0 *?\))".format(filt)
-    phone_regex = "(?:(?<=\D)00{0}3{0}1|\+{0}3{0}1){1}?(?:{0}[0-9]){{9}}".format(filt, mid_zero)
-    replace_regex = "{0}|{1}".format(mid_zero, filt)
-    zeroplus_regex = "^00"
-    phone_nl_filter = re.compile(phone_regex)
-    replace_filter = re.compile(replace_regex)
-    zeroplus_filter = re.compile(zeroplus_regex)
+class PhoneNumbers:    
 
     output_schema = StructType([
         StructField("num", StringType(), True),
         StructField("urls", ArrayType(StringType()), True)
         ])
 
-    def __init__(self, input_file, output_dir, name, partitions=None):
+    def __init__(self, input_file, output_dir, name, partitions=None, local=False):
         self.name = name
         self.input_file = input_file
         self.output_dir = output_dir
         self.partitions = partitions
+        self.local = local
 
     def run(self):
-        sc = SparkContext(appName=self.name)
+        if self.local:
+            conf = SparkConf()
+            conf = (conf
+                    .set('spark.executor.memory', '16G')
+                    .set('spark.driver.memory', '24G')
+                    .set('spark.driver.maxResultSize', '8G')
+                    .set("spark.executor.heartbeatInterval","3600s"))
+            sc = SparkContext(appName=self.name,conf=conf)
+        else:
+            sc = SparkContext(appName=self.name)
+
+        
         sqlc = SQLContext(sparkContext=sc)
 
         self.failed_record_parse = sc.accumulator(0)
@@ -59,6 +55,7 @@ class PhoneNumbers:
         self.log(sc, "Started..")
         t0 = time.time()
         input_data = sc.textFile(self.input_file, minPartitions=self.partitions)
+
         phone_numbers = input_data.flatMap(self.process_warcs_new).flatMap(lambda x: x)
         
         phone_numb_agg_web = phone_numbers.groupByKey().mapValues(list) 
@@ -71,21 +68,8 @@ class PhoneNumbers:
         t1 = time.time()
         self.log(sc, "Found {} unique phone numbers in total.".format(phone_numb_agg_web.count()))
         self.log(sc, "New implementation took: {:.3f} seconds.".format(t1-t0))
-        t2 = time.time()
-        input_data = sc.textFile(self.input_file.replace("wet-uncompressed","wet"), minPartitions=self.partitions)
-        phone_numbers = input_data.flatMap(self.process_warcs)
+        t2 = time.time()        
         
-        phone_numb_agg_web = phone_numbers.groupByKey().mapValues(list) 
-
-        sqlc.createDataFrame(phone_numb_agg_web, schema=self.output_schema) \
-                .write \
-                .mode('overwrite') \
-                .format("parquet") \
-                .save(self.output_dir+'orig')
-        t3 = time.time()
-
-        self.log(sc, "Found {} unique phone numbers in total.".format(phone_numb_agg_web.count()))        
-        self.log(sc, "Original implementation took: {:.3f} seconds.".format(t3-t2))
         self.log(sc, "Failed segments: {}".format(self.failed_segment.value))
         self.log(sc, "Failed parses: {}".format(self.failed_record_parse.value))
 
@@ -98,26 +82,25 @@ class PhoneNumbers:
         else:
             log.warn("Level unknown for logging: {}".format(level))
 
-    def process_warcs(self, input_uri):
-        stream = None
-        if input_uri.startswith('file:'):
-            stream = self.process_file_warc(input_uri)
-        elif input_uri.startswith('s3:/'):
-            stream = self.process_s3_warc(input_uri)
-        if stream is None:
-            return []
-        return self.process_records(stream)
-
     def process_warcs_new(self, input_uri):
+        t_start = time.time()
         if input_uri.startswith('file:'):
-            return self.process_records_new(input_uri[5:])
+            res = self.process_records_new(input_uri[5:], False)
+            t_end = time.time()
+            print("##Download: {};{:.3f}".format(input_uri[5:],0))  
+            print("##Process: {};{:.3f}".format(input_uri[5:],t_end-t_start)) 
+            
+            return res
         elif input_uri.startswith('s3:/'):
             tempfileobj = self.process_s3_warc_new(input_uri)
             tempname = tempfileobj.name
             tempfileobj.close()
-            print("Passing {} temp file to the C code.".format(tempname))
-            res = self.process_records_new(tempname)            
-            return res
+            print("Passing {} temp file to the C code.".format(tempname),level='info')
+            t_mid = time.time()
+            res = self.process_records_new(tempname, True)   
+            t_end = time.time()
+            print("##Download: {};{:.3f}".format(path,t_mid-t_start))    
+            print("##Process: {};{:.3f}".format(path,t_end-t_mid)) 
         else:
             return []
         return self.process_records(stream)
@@ -129,83 +112,29 @@ class PhoneNumbers:
             s3pattern = re.compile('^s3://([^/]+)/(.+)')
             s3match = s3pattern.match(uri)
             if s3match is None:
-                print("Invalid URI: {}".format(uri))
+                self.log(sc,"Invalid URI: {}".format(uri),level='error')
                 self.failed_segment.add(1)
                 return None
             bucketname = s3match.group(1)
             path = s3match.group(2)
             warctemp = NamedTemporaryFile(mode='w+b',delete=False)
-            s3client.download_fileobj(bucketname, path, warctemp)
-            warctemp.seek(0)       
+            s3client.download_fileobj(bucketname, path, warctemp)                 
             return warctemp
         except BaseException as e:
-            print("Failed fetching {}\nError: {}".format(uri, e))
+            self.log(sc,"Failed fetching {}\nError: {}".format(uri, e),level='error')
             self.failed_segment.add(1)
-            return None
+            return None  
 
-    def process_s3_warc(self, uri):
+    def process_records_new(self, filename, is_s3=False):
         try:
-            no_sign_request = botocore.client.Config(signature_version=botocore.UNSIGNED)
-            s3client = boto3.client('s3', config=no_sign_request)
-            s3pattern = re.compile('^s3://([^/]+)/(.+)')
-            s3match = s3pattern.match(uri)
-            if s3match is None:
-                print("Invalid URI: {}".format(uri))
-                self.failed_segment.add(1)
-                return None
-            bucketname = s3match.group(1)
-            path = s3match.group(2)
-            warctemp = TemporaryFile(mode='w+b')
-            s3client.download_fileobj(bucketname, path, warctemp)
-            warctemp.seek(0)
-            return warctemp
-        except BaseException as e:
-            print("Failed fetching {}\nError: {}".format(uri, e))
-            self.failed_segment.add(1)
-            return None
-
-    def process_file_warc(self, input_file):
-        try:
-            return open(input_file[5:], 'rb')
-        except BaseException as e:
-            print("Error ocurred loading file: {}".format(input_file))
-            self.failed_segment.add(1)
-            return None
-            
-    def process_records(self, stream):
-        try:
-            for rec in ArchiveIterator(stream):
-                uri = rec.rec_headers.get_header("WARC-Target-URI")
-                if uri is None:
-                    continue
-                try:
-                    for num in self.find_phone_numbers(rec.content_stream()):
-                        yield (num, uri)
-                except UnicodeDecodeError as e:
-                    print("Error: {}".format(e))
-                    self.failed_record_parse.add(1)
-                    continue
+            if is_s3:
+                yield pnf.load(filename, True, True)
+            else:
+                yield pnf.load(filename, True, False)
 
         except BaseException as e:
-            print("Failed parsing.\nError: {}".format(e))
+            self.log(sc,"Failed parsing with C implementation.\nError: {}".format(e),level='error')
             self.failed_segment.add(1)
-
-    def process_records_new(self, filename):
-        try:
-            yield pnf.load(filename, True, True)
-
-        except BaseException as e:
-            print("Failed parsing with C implementation.\nError: {}".format(e))
-            self.failed_segment.add(1)
-
-    def find_phone_numbers(self, content):
-        content = content.read().decode('utf-8')
-        numbers = self.phone_nl_filter.findall(content)
-        nums_filt = {re.sub(self.zeroplus_filter, "+",
-                            re.sub(self.replace_filter, "", num))
-                     for num in numbers}
-        for num in nums_filt:
-            yield num 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Phone number analysis using Apache Spark")
@@ -221,7 +150,10 @@ if __name__ == "__main__":
     parser.add_argument("--name", '-n', metavar="application_name",
                         type=str, default="Phone Numbers",
                         help="override name of application")
+    parser.add_argument("--local", '-l', action='store_true',
+                        help="Run locally (set cluster mem sizes)")
+    
     conf = parser.parse_args()
     pn = PhoneNumbers(conf.input, conf.output,
-                      conf.name, partitions=conf.partitions)
+                      conf.name, partitions=conf.partitions, local=conf.local)
     pn.run()

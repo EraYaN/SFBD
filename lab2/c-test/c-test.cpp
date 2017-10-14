@@ -96,7 +96,8 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
                                 reset_phonenumber();
                                 continue;
                             }
-                        } else if (phone_idx == 4) {
+                        }
+                        else if (phone_idx == 4) {
                             if (!isprefix_4()) {
                                 reset_phonenumber();
                                 continue;
@@ -205,8 +206,6 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
             }
         }
     }
-
-    //delete current_url;
 }
 
 int main() {
