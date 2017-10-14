@@ -40,8 +40,8 @@ static PyObject *
 phonenumberfilter_load(PyObject *self, PyObject *args)
 {
     const char *file;
-    char usecompression = 1;
-    char deletefilewhendone = 0;
+    int usecompression = 1;
+    int deletefilewhendone = 0;
 
     if (!PyArg_ParseTuple(args, "s|pp", &file, &usecompression, &deletefilewhendone)) {
         PyErr_SetString(PhoneNumberFilterError, "Parsing arguments failed.");
