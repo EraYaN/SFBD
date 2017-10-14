@@ -3,7 +3,7 @@
 from warcio.archiveiterator import ArchiveIterator
 from warcio.recordloader import ArchiveLoadFailed
 
-from tempfile import TemporaryFile
+from tempfile import TemporaryFile, NamedTemporaryFile
 
 import argparse
 
@@ -18,6 +18,8 @@ import boto3
 import botocore
 
 import re
+
+import os
 
 import time
 
@@ -58,17 +60,13 @@ class PhoneNumbers:
         t0 = time.time()
         input_data = sc.textFile(self.input_file, minPartitions=self.partitions)
         phone_numbers = input_data.flatMap(self.process_warcs_new).flatMap(lambda x: x)
-
-        #print("Found {} phone numbers in total.".format(phone_numbers.count()))
-
-        phone_numb_agg_web = phone_numbers.groupByKey().mapValues(list)
         
-        
+        phone_numb_agg_web = phone_numbers.groupByKey().mapValues(list) 
 
         sqlc.createDataFrame(phone_numb_agg_web, schema=self.output_schema) \
                 .write \
                 .mode('overwrite') \
-                .format("json") \
+                .format("parquet") \
                 .save(self.output_dir)
         t1 = time.time()
         self.log(sc, "Found {} unique phone numbers in total.".format(phone_numb_agg_web.count()))
@@ -76,17 +74,13 @@ class PhoneNumbers:
         t2 = time.time()
         input_data = sc.textFile(self.input_file.replace("wet-uncompressed","wet"), minPartitions=self.partitions)
         phone_numbers = input_data.flatMap(self.process_warcs)
-
-        #print("Found {} phone numbers in total.".format(phone_numbers.count()))
-
-        phone_numb_agg_web = phone_numbers.groupByKey().mapValues(list)
         
-        
+        phone_numb_agg_web = phone_numbers.groupByKey().mapValues(list) 
 
         sqlc.createDataFrame(phone_numb_agg_web, schema=self.output_schema) \
                 .write \
                 .mode('overwrite') \
-                .format("json") \
+                .format("parquet") \
                 .save(self.output_dir+'orig')
         t3 = time.time()
 
@@ -115,14 +109,39 @@ class PhoneNumbers:
         return self.process_records(stream)
 
     def process_warcs_new(self, input_uri):
-        stream = None
         if input_uri.startswith('file:'):
             return self.process_records_new(input_uri[5:])
         elif input_uri.startswith('s3:/'):
-            stream = self.process_s3_warc(input_uri)
-        if stream is None:
+            tempfileobj = self.process_s3_warc_new(input_uri)
+            tempname = tempfileobj.name
+            tempfileobj.close()
+            print("Passing {} temp file to the C code.".format(tempname))
+            res = self.process_records_new(tempname)            
+            return res
+        else:
             return []
         return self.process_records(stream)
+
+    def process_s3_warc_new(self, uri):
+        try:
+            no_sign_request = botocore.client.Config(signature_version=botocore.UNSIGNED)
+            s3client = boto3.client('s3', config=no_sign_request)
+            s3pattern = re.compile('^s3://([^/]+)/(.+)')
+            s3match = s3pattern.match(uri)
+            if s3match is None:
+                print("Invalid URI: {}".format(uri))
+                self.failed_segment.add(1)
+                return None
+            bucketname = s3match.group(1)
+            path = s3match.group(2)
+            warctemp = NamedTemporaryFile(mode='w+b',delete=False)
+            s3client.download_fileobj(bucketname, path, warctemp)
+            warctemp.seek(0)       
+            return warctemp
+        except BaseException as e:
+            print("Failed fetching {}\nError: {}".format(uri, e))
+            self.failed_segment.add(1)
+            return None
 
     def process_s3_warc(self, uri):
         try:
@@ -173,7 +192,7 @@ class PhoneNumbers:
 
     def process_records_new(self, filename):
         try:
-            yield pnf.load(filename)
+            yield pnf.load(filename, True, True)
 
         except BaseException as e:
             print("Failed parsing with C implementation.\nError: {}".format(e))
