@@ -394,3 +394,4 @@ fabric.properties
 vc14/
 lab2/crawl-data
 lab2/input
+*.gz
