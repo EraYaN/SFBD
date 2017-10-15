@@ -77,7 +77,7 @@ class PhoneNumbers:
 
         t1 = time.perf_counter()
 
-        self.log(sc,"Found {} unique phone numbers in total.".format(phone_numb_agg_web.count()))
+        self.log(sc,"Found {} unique phone numbers in total, processed in {} and written in {} partitions.".format(phone_numb_agg_web.count(),usedpartitions,phone_numb_agg_web.getNumPartitions()))
         self.log(sc,"New implementation took: {:.3f} seconds.".format(t1-t0))
         self.log(sc,"Download took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.download_time.value, self.download_time.value/usedpartitions, self.download_time.value/segments))
         self.log(sc,"Processing took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.process_time.value, self.process_time.value/usedpartitions, self.process_time.value/segments))
