@@ -18,7 +18,8 @@ else:
                     sources=['phonenumberfiltermodule.cpp'],
                     include_dirs=['gzstream/'],
                     libraries=['z'],
-                    library_dirs=[])
+                    library_dirs=[],
+                    extra_compile_args = ["-fprefetch-loop-arrays"])
 
 setup (name='PhoneNumberFilter',
        version='1.2',

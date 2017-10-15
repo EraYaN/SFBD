@@ -76,6 +76,7 @@ char current_phone[PHONENUMBERBUFFERSIZE];
 int phone_idx = 0;
 int totalcounter = 0;
 char newline = '\n';
+char carriagereturn = '\r';
 bool startedwithone = false;
 bool specialshortnumber = false;
 bool skippedzero = false;
@@ -138,7 +139,7 @@ static void process_data(char * data, PyObject* out, size_t size) {
             if (memcmp(&data[i], HEADER_MATCH, HEADER_MATCH_SIZE) == 0) {
                 i += HEADER_MATCH_SIZE + 1;
                 int old_i = i;
-                while (data[i] != newline) {
+                while (data[i] != carriagereturn && data[i] != newline) {
                     i++;
                 }
                 memcpy(current_url, &data[old_i], i - old_i);

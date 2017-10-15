@@ -11,6 +11,8 @@ from pyspark.sql.types import StructType, StructField, StringType, ArrayType
 
 from tempfile import NamedTemporaryFile
 
+#from operator import add
+
 import boto3
 import botocore
 
@@ -18,6 +20,17 @@ import logging
 
 import phonenumberfilter as pnf
 
+
+def Combiner(a):    #Turns value a (a tuple) into a list of a single tuple.
+    return [a]
+
+def MergeValue(a, b): #a is the new type [(,), (,), ..., (,)] and b is the old type (,)
+    a.extend([b])
+    return a
+
+def MergeCombiners(a, b): #a is the new type [(,),...,(,)] and so is b, combine them
+    a.extend(b)
+    return a
 
 class PhoneNumbers:
     s3pattern = re.compile('^s3://([^/]+)/(.+)')
@@ -66,9 +79,11 @@ class PhoneNumbers:
         segments = input_data.count()
         usedpartitions = input_data.getNumPartitions()
         self.log(sc,"Data has {} segments on {} partitions..".format(segments, usedpartitions))       
-        phone_numbers = input_data.flatMap(self.process_warcs)        
-        phone_numb_agg_web = phone_numbers.groupByKey().mapValues(list)
-        
+        phone_numbers = input_data.flatMap(self.process_warcs)
+        phone_numb_agg_web = phone_numbers.combineByKey(Combiner, MergeValue, MergeCombiners)
+        #phone_numb_agg_web = phone_numbers.map(lambda x: (x[0],[x[1]])).reduceByKey(MergeCombiners)
+        #phone_numb_agg_web = phone_numbers.groupByKey().mapValues(list)        
+
         sqlc.createDataFrame(phone_numb_agg_web, schema=self.output_schema) \
                 .write \
                 .mode('overwrite') \
