@@ -43,7 +43,8 @@ class PhoneNumbers:
                     .set('spark.executor.memory', '16G')
                     .set('spark.driver.memory', '24G')
                     .set('spark.driver.maxResultSize', '8G')
-                    .set("spark.executor.heartbeatInterval", "3600s"))
+                    .set("spark.executor.heartbeatInterval", "10s")
+                    .set("spark.network.timeout", 10000000))
             sc = SparkContext(appName=self.name, conf=conf)
         else:
             sc = SparkContext(appName=self.name)
@@ -106,7 +107,7 @@ class PhoneNumbers:
             tempfileobj = self.process_s3_warc(input_uri)
             tempname = tempfileobj.name
             tempfileobj.close()
-            
+            t_mid = time.perf_counter()          
             res = self.process_records(tempname, True)
             t_end = time.perf_counter()            
         else:
