@@ -56,7 +56,7 @@ class PhoneNumbers:
                     .set('spark.executor.memory', '16G')
                     .set('spark.driver.memory', '24G')
                     .set('spark.driver.maxResultSize', '8G')
-                    .set("spark.executor.heartbeatInterval", "10s")
+                    .set("spark.executor.heartbeatInterval", "60s")
                     .set("spark.network.timeout", 10000000))
             sc = SparkContext(appName=self.name, conf=conf)
         else:
@@ -66,6 +66,7 @@ class PhoneNumbers:
         self.failed_segment = sc.accumulator(0)
         self.download_time = sc.accumulator(0.0)
         self.process_time = sc.accumulator(0.0)
+        self.segments = sc.accumulator(0)
 
         sqlc = SQLContext(sparkContext=sc)
 
@@ -75,11 +76,10 @@ class PhoneNumbers:
 
         self.log(sc, "Started...")
         t0 = time.perf_counter()
-        input_data = sc.textFile(self.input_file, minPartitions=self.partitions)
-        segments = input_data.count()
+        input_data = sc.textFile(self.input_file, minPartitions=self.partitions)        
         usedpartitions = input_data.getNumPartitions()
 
-        self.log(sc,"Data has {} segments on {} partitions..".format(segments, usedpartitions))       
+        self.log(sc,"Data has {} partitions..".format(usedpartitions))       
         phone_numbers = input_data.flatMap(self.process_warcs)
         phone_numb_agg_web = phone_numbers.combineByKey(Combiner, MergeValue, MergeCombiners)
         #phone_numb_agg_web = phone_numbers.map(lambda x: (x[0],[x[1]])).reduceByKey(MergeCombiners)
@@ -93,11 +93,11 @@ class PhoneNumbers:
 
         t1 = time.perf_counter()
 
-        self.log(sc, "Found {} unique phone numbers in total, processed in {} and written in {} partitions.".format(phone_numb_agg_web.count(), usedpartitions, phone_numb_agg_web.getNumPartitions()))
+        self.log(sc, "Found {} unique phone numbers in total in {} segments, processed in {} and written in {} partitions.".format(phone_numb_agg_web.count(), self.segments.value, usedpartitions, phone_numb_agg_web.getNumPartitions()))
         self.log(sc, "New implementation took: {:.3f} seconds.".format(t1-t0))
-        self.log(sc, "Download took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.download_time.value, self.download_time.value/usedpartitions, self.download_time.value/segments))
-        self.log(sc, "Processing took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.process_time.value, self.process_time.value/usedpartitions, self.process_time.value/segments))
-        self.log(sc, "Processed segments: {}".format(segments-self.failed_segment.value))
+        self.log(sc, "Download took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.download_time.value, self.download_time.value/usedpartitions, self.download_time.value/self.segments.value))
+        self.log(sc, "Processing took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.process_time.value, self.process_time.value/usedpartitions, self.process_time.value/self.segments.value))
+        self.log(sc, "Processed segments: {}".format(self.segments.value-self.failed_segment.value))
         self.log(sc, "Failed segments: {}".format(self.failed_segment.value))
 
 
@@ -129,6 +129,7 @@ class PhoneNumbers:
         else:
             res = []
 
+        self.segments.add(1)
         self.download_time.add(t_mid - t_start)
         self.process_time.add(t_end - t_mid)
         return res
