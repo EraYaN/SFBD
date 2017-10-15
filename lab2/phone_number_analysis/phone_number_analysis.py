@@ -61,7 +61,7 @@ class PhoneNumbers:
             sc = SparkContext(appName=self.name, conf=conf)
         else:
             sc = SparkContext(appName=self.name)
-        
+
         #sc.setLogLevel('info')
         self.failed_segment = sc.accumulator(0)
         self.download_time = sc.accumulator(0.0)
@@ -72,12 +72,13 @@ class PhoneNumbers:
         if self.partitions is None:
             self.partitions = sc.defaultParallelism
 
-        
-        self.log(sc,"Started...".format(self.partitions))       
+
+        self.log(sc, "Started...")
         t0 = time.perf_counter()
         input_data = sc.textFile(self.input_file, minPartitions=self.partitions)
         segments = input_data.count()
         usedpartitions = input_data.getNumPartitions()
+
         self.log(sc,"Data has {} segments on {} partitions..".format(segments, usedpartitions))       
         phone_numbers = input_data.flatMap(self.process_warcs)
         phone_numb_agg_web = phone_numbers.combineByKey(Combiner, MergeValue, MergeCombiners)
@@ -92,12 +93,12 @@ class PhoneNumbers:
 
         t1 = time.perf_counter()
 
-        self.log(sc,"Found {} unique phone numbers in total, processed in {} and written in {} partitions.".format(phone_numb_agg_web.count(),usedpartitions,phone_numb_agg_web.getNumPartitions()))
-        self.log(sc,"New implementation took: {:.3f} seconds.".format(t1-t0))
-        self.log(sc,"Download took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.download_time.value, self.download_time.value/usedpartitions, self.download_time.value/segments))
-        self.log(sc,"Processing took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.process_time.value, self.process_time.value/usedpartitions, self.process_time.value/segments))
-        self.log(sc,"Processed segments: {}".format(segments-self.failed_segment.value))
-        self.log(sc,"Failed segments: {}".format(self.failed_segment.value))
+        self.log(sc, "Found {} unique phone numbers in total, processed in {} and written in {} partitions.".format(phone_numb_agg_web.count(), usedpartitions, phone_numb_agg_web.getNumPartitions()))
+        self.log(sc, "New implementation took: {:.3f} seconds.".format(t1-t0))
+        self.log(sc, "Download took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.download_time.value, self.download_time.value/usedpartitions, self.download_time.value/segments))
+        self.log(sc, "Processing took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.process_time.value, self.process_time.value/usedpartitions, self.process_time.value/segments))
+        self.log(sc, "Processed segments: {}".format(segments-self.failed_segment.value))
+        self.log(sc, "Failed segments: {}".format(self.failed_segment.value))
 
 
     def log(self, sc, message, level="warn"):
@@ -116,15 +117,15 @@ class PhoneNumbers:
         if input_uri.startswith('file:'):
             t_mid = t_start
             res = self.process_records(input_uri[5:], False)
-            t_end = time.perf_counter()            
+            t_end = time.perf_counter()
 
         elif input_uri.startswith('s3:/'):
             tempfileobj = self.process_s3_warc(input_uri)
             tempname = tempfileobj.name
             tempfileobj.close()
-            t_mid = time.perf_counter()          
+            t_mid = time.perf_counter()
             res = self.process_records(tempname, True)
-            t_end = time.perf_counter()            
+            t_end = time.perf_counter()
         else:
             res = []
 
@@ -136,7 +137,7 @@ class PhoneNumbers:
     def process_s3_warc(self, uri):
         try:
             no_sign_request = botocore.client.Config(signature_version=botocore.UNSIGNED)
-            s3client = boto3.client('s3', config=no_sign_request)            
+            s3client = boto3.client('s3', config=no_sign_request)
             s3match = self.s3pattern.match(uri)
             if s3match is None:
                 print("ERROR: Invalid URI: {}".format(uri))
