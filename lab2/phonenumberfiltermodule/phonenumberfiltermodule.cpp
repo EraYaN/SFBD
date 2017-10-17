@@ -47,9 +47,9 @@ phonenumberfilter_load(PyObject *self, PyObject *args)
         PyErr_SetString(PhoneNumberFilterError, "Parsing arguments failed.");
         return NULL;
     }
-    
-    return read_data(file, usecompression!=0, deletefilewhendone!=0);
-        
+
+    return read_data(file, usecompression != 0, deletefilewhendone != 0);
+
 }
 
 PyMODINIT_FUNC
@@ -77,8 +77,6 @@ int phone_idx = 0;
 int totalcounter = 0;
 char newline = '\n';
 char carriagereturn = '\r';
-bool startedwithone = false;
-bool specialshortnumber = false;
 bool skippedzero = false;
 bool seenothercharacter = false;
 size_t endsize = 0;
@@ -96,8 +94,6 @@ static void inline write_to_output(PyObject* list) {
 static void inline reset_phonenumber() {
     in_phonenumber = false;
     phone_idx = 0;
-    startedwithone = false;
-    specialshortnumber = false;
     skippedzero = false;
 }
 static void inline reset_all() {
@@ -113,8 +109,7 @@ static void inline add_to_phonenumber(char c) {
 
 static void inline write_to_output(std::ofstream* out) {
     current_phone[phone_idx] = '\0';
-    *out << current_phone << std::endl; // << ", " << current_url << std::endl;
-    //totalcounter++;
+    *out << current_phone << std::endl;
 }
 
 static bool inline isprefix_3() {
@@ -139,13 +134,12 @@ static void process_data(char * data, PyObject* out, size_t size) {
             if (memcmp(&data[i], HEADER_MATCH, HEADER_MATCH_SIZE) == 0) {
                 i += HEADER_MATCH_SIZE + 1;
                 int old_i = i;
-                while (data[i] != carriagereturn && data[i] != newline) {
+                while (data[i] != newline && data[i] != carriagereturn) {
                     i++;
                 }
                 memcpy(current_url, &data[old_i], i - old_i);
                 current_url[i - old_i] = '\0';
                 has_url = true;
-                //std::cout << "New URL: " << current_url << std::endl;
             }
             seenothercharacter = true;
         }
@@ -157,14 +151,8 @@ static void process_data(char * data, PyObject* out, size_t size) {
                         reset_phonenumber();
                     }
                     else {
-                        if (phone_idx == 3) {
-                            if (!isprefix_3()) {
-                                reset_phonenumber();
-                                continue;
-                            }
-                        }
-                        else if (phone_idx == 4) {
-                            if (!isprefix_4()) {
+                        if (phone_idx == 4) {
+                            if (!isprefix_3() && !isprefix_4()) {
                                 reset_phonenumber();
                                 continue;
                             }
@@ -189,47 +177,6 @@ static void process_data(char * data, PyObject* out, size_t size) {
                     if (data[i] == '0') {
                         add_to_phonenumber(data[i]);
                         in_phonenumber = true;
-                    }
-                    else if (data[i] == '1') { //for 112 and 14xx(xx) 16xx 18xx numbers
-                        add_to_phonenumber(data[i]);
-                        in_phonenumber = true;
-                        startedwithone = true;
-                        if ((data[i + 1] == '1'&&data[i + 2] == '2')) {
-                            add_to_phonenumber('1');
-                            add_to_phonenumber('2');
-                            i += 2;
-                            write_to_output(out);
-                            reset_phonenumber();
-                        }
-                        else if ((data[i + 1] == '4'&&data[i + 2] == '4')) {
-                            add_to_phonenumber('4');
-                            add_to_phonenumber('4');
-                            i += 2;
-                            write_to_output(out);
-                            reset_phonenumber();
-                        }
-                        else if ((data[i + 1] == '4') && data[i + 2] == '0')
-                        {
-                            add_to_phonenumber('4');
-                            add_to_phonenumber('0');
-                            i += 2;
-                            specialshortnumber = true;
-                        }
-                        else if ((data[i + 1] == '1') && data[i + 2] == '6')
-                        {
-                            add_to_phonenumber('1');
-                            add_to_phonenumber('6');
-                            i += 2;
-                            specialshortnumber = true;
-                        }
-                        else if (data[i + 1] == '6' || data[i + 1] == '8') {
-                            add_to_phonenumber(data[i + 1]);
-                            i += 1;
-                            specialshortnumber = true;
-                        }
-                        else {
-                            reset_phonenumber();
-                        }
                     }
                     else if (data[i] == '+') {
                         if ((data[i + 1] == '3'&&data[i + 2] == '1')) {
@@ -260,20 +207,12 @@ static void process_data(char * data, PyObject* out, size_t size) {
                         //normal number
                         write_to_output(out);
                     }
-                    else if (phone_idx >= 4 && phone_idx <= 6) {
-                        if (specialshortnumber) {
-                            //subscriberservices, municipalities, carrierselect etc
-                            write_to_output(out);
-                        }
-                    }
                 }
                 reset_phonenumber();
                 seenothercharacter = true;
             }
         }
     }
-
-    //delete current_url;
 }
 static PyObject * read_data(const char* filename, bool usecompression, bool deletefilewhendone) {
     /*if(usecompression)
