@@ -21,8 +21,8 @@ char current_phone[PHONENUMBERBUFFERSIZE];
 int phone_idx = 0;
 int totalcounter = 0;
 char newline = '\n';
-bool startedwithone = false;
-bool specialshortnumber = false;
+//bool startedwithone = false;
+//bool specialshortnumber = false;
 bool skippedzero = false;
 bool seenothercharacter = false;
 size_t endsize = 0;
@@ -30,8 +30,8 @@ size_t endsize = 0;
 static void inline reset_phonenumber() {
     in_phonenumber = false;
     phone_idx = 0;
-    startedwithone = false;
-    specialshortnumber = false;
+    //startedwithone = false;
+    //specialshortnumber = false;
     skippedzero = false;
 }
 static void inline reset_all() {
@@ -73,7 +73,7 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
             if (memcmp(&data[i], HEADER_MATCH, HEADER_MATCH_SIZE) == 0) {
                 i += HEADER_MATCH_SIZE + 1;
                 int old_i = i;
-                while (data[i] != newline) {
+                while (data[i] != newline && data[i] != carriagereturn) {
                     i++;
                 }
                 memcpy(current_url, &data[old_i], i - old_i);
@@ -91,14 +91,8 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
                         reset_phonenumber();
                     }
                     else {
-                        if (phone_idx == 3) {
-                            if (!isprefix_3()) {
-                                reset_phonenumber();
-                                continue;
-                            }
-                        }
-                        else if (phone_idx == 4) {
-                            if (!isprefix_4()) {
+                        if (phone_idx == 4) {
+                            if (!isprefix_3() && !isprefix_4()) {
                                 reset_phonenumber();
                                 continue;
                             }
@@ -124,7 +118,7 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
                         add_to_phonenumber(data[i]);
                         in_phonenumber = true;
                     }
-                    else if (data[i] == '1') { //for 112 and 14xx(xx) 16xx 18xx numbers
+                    /*else if (data[i] == '1') { //for 112 and 14xx(xx) 16xx 18xx numbers
                         add_to_phonenumber(data[i]);
                         in_phonenumber = true;
                         startedwithone = true;
@@ -164,7 +158,7 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
                         else {
                             reset_phonenumber();
                         }
-                    }
+                    }*/
                     else if (data[i] == '+') {
                         if ((data[i + 1] == '3'&&data[i + 2] == '1')) {
                             in_phonenumber = true;
@@ -194,12 +188,12 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
                         //normal number
                         write_to_output(out);
                     }
-                    else if (phone_idx >= 4 && phone_idx <= 6) {
+                    /*else if (phone_idx >= 4 && phone_idx <= 6) {
                         if (specialshortnumber) {
                             //subscriberservices, municipalities, carrierselect etc
                             write_to_output(out);
                         }
-                    }
+                    }*/
                 }
                 reset_phonenumber();
                 seenothercharacter = true;
@@ -211,7 +205,7 @@ static void process_data(char * data, std::ofstream* out, size_t size) {
 int main() {
 
     //const char* segmentfile = "C:\\commoncrawl\\SBD-Lab2\\input\\custom_test-uncompressed.txt";
-    const char* segmentfile = "C:\\commoncrawl\\SBD-Lab2\\input\\test_wet_long.txt";
+    const char* segmentfile = "C:\\commoncrawl\\SBD-Lab2\\input\\test_wet_16.txt";
     const char* outfilename = "C:\\commoncrawl\\SBD-Lab2\\output_c-test.txt";
     double inittime = 0;
     double readingtime = 0;
