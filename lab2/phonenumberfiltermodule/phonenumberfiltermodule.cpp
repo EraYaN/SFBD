@@ -175,8 +175,11 @@ static void process_data(char * data, PyObject* out, size_t size) {
                 }
                 else if (seenothercharacter) {
                     if (data[i] == '0') {
-                        add_to_phonenumber(data[i]);
-                        in_phonenumber = true;
+                        if (data[i + 1] == '0' && data[i + 2] == '3'&&data[i + 3] == '1') {
+                            in_phonenumber = true;
+                            add_to_phonenumber('0');
+                            i += 3;
+                        }
                     }
                     else if (data[i] == '+') {
                         if ((data[i + 1] == '3'&&data[i + 2] == '1')) {
@@ -188,6 +191,11 @@ static void process_data(char * data, PyObject* out, size_t size) {
                             in_phonenumber = true;
                             add_to_phonenumber('0');
                             i += 3;
+                        }
+                        else if (data[i + 3] == '3'&&data[i + 4] == '1') {
+                            in_phonenumber = true;
+                            add_to_phonenumber('0');
+                            i += 4;
                         }
                     }
                 }

@@ -22,7 +22,7 @@ else:
                     extra_compile_args = ["-fprefetch-loop-arrays"])
 
 setup (name='PhoneNumberFilter',
-       version='1.2.2',
-       description='This is a package to quickly filter dutch phone numbers from a WARC WET file, now with compression support.',
+       version='1.2.3',
+       description='This is a package to quickly filter dutch phone numbers in international format from a WARC WET file, now with compression support.',
        zip_safe=False,
        ext_modules=[module1])
