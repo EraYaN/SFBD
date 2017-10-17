@@ -15,5 +15,5 @@ if [ -z "$CLUSTER" ]
 	echo Opening tunnel to $CLUSTER..
 
 	chmod 600 ~/SparkCluster.pem
-	aws emr socks --cluster-id $CLUSTER --key-pair-file ~/SparkCluster.pem
+	aws emr socks --cluster-id $CLUSTER --key-pair-file ~/main.pem
 fi
