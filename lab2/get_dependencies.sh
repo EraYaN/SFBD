@@ -10,6 +10,8 @@ done;
 aws s3 cp s3://$1/phonenumberfiltermodule/setup.py ~/
 aws s3 cp s3://$1/phonenumberfiltermodule/prefixes.h ~/
 aws s3 cp s3://$1/phonenumberfiltermodule/phonenumberfiltermodule.cpp ~/
+aws s3 cp s3://$1/phonenumberfiltermodule/timing.h ~/
+aws s3 cp s3://$1/phonenumberfiltermodule/timing.cpp ~/
 aws s3 cp --recursive s3://$1/gzstream ~/gzstream
 
 (cd ~ && sudo python3 setup.py install)

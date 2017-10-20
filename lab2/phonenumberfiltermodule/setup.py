@@ -19,7 +19,7 @@ else:
                     include_dirs=['gzstream/'],
                     libraries=['z'],
                     library_dirs=[],
-                    extra_compile_args = ["-fprefetch-loop-arrays"])
+                    extra_compile_args = ["-fprefetch-loop-arrays", "-std=c++11", "-O3"])
 
 setup (name='PhoneNumberFilter',
        version='1.3.0',
