@@ -313,6 +313,7 @@ pip-log.txt
 *.pyg
 !*-rc.pdf
 !**/resources/**/*.pdf
+!**/resource/**/*.pdf
 *.fls
 *.fdb_latexmk
 *.auxlock

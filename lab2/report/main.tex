@@ -1,0 +1,127 @@
+\documentclass{article}
+\input{include/include}
+\addbibresource{include/bibliography.bib}
+
+\title{ET4310 -- Supercomputing for Big Data -- Lab 2}
+\author{Erwin de Haan (4222814) \and Robin Hes (4236815)}
+
+\begin{document}
+\maketitle
+\section{Introduction}
+In this second assignment of the Supercomputing for Big Data course, a plain-text crawl of the entire internet, the \emph{Common Crawl}, is processed in order to parse every Dutch phone number it contains.
+The output is a grouped list of every found number accompanied by the URL(s) at which that particular number was found.
+The Amazon \emph{Elastic MapReduce} (EMR) service is employed to enable processing this rather large dataset in a reasonable amount of time.
+
+The aim of the assignment is to optimise the given big data application that is already capable of detecting phone numbers in plain text, in order to attain a certain performance metric.
+This metric might be cost, execution time, computational efficiency or anything else that is deemed relevant.
+
+This report will first present a brief analysis of the application, in which possible performance bottlenecks will be identified.
+Consequently, this analysis will be used to formulate two independent optimisation strategies along with hypotheses on their effects and any interesting implementation details.
+A third section lists the obtained results for the final choice of architecture, after which the report is concluded by a brief summary and future recommendations.
+
+\section{Phone number analysis}
+The entire process is of the form of the standard big data pipeline, meaning it can be divided in five consequent stages: Sense/Acquire, Store/Ingest, Retrieve/Filter, Analyse, and Visualise.
+Both the sense and store stage have been previously performed, resulting in the Common Crawl as it is provided to the user.
+The plain-text part of it consists of a large number of segments that each contain part of the entire set.
+The September 2017 crawl that will be used in this assignment consists of \num{72000} compressed segments of around \SI{130}{MB} each, making for a total of \SI{8.86}{TB} of compressed data \cite{commoncrawl2017september}.
+
+For the next stage, the retrieval and filtering of data, a script is provided to obtain a list of URLs at which every segment of the dataset may be found.
+This list is then used as input to a Pyspark application that takes care of extracting every Dutch phone number it might find, along with the URL it appears on.
+The stage is concluded by grouping results by phone number and storing them in a \emph{DataFrame}, which allows convenient access for further processing and analysis.
+Note that the retrieval/filtering stage implies a transition from unstructured to structured data, which is the primary interest of this assignment.
+The analysis and visualisation stages are not considered here, but as an example one might be interested in the relation between the number's area codes and the sites they are mentioned on, and try to visualise this in a map of some sort.
+
+\subsection{Application profile}
+
+Now, as we try to optimise the Pyspark application, it is important to obtain some insight in the operations it involves.
+It can be roughly divided in four consecutive steps:
+
+\begin{enumerate}
+	\item Downloading a segment from Amazon's S3 storage and loading it into memory
+	\item Decompressing this segment to obtain plain-text data
+	\item Extracting phone numbers and URLs (map)
+	\item Grouping results and storing them (reduce)
+\end{enumerate}
+
+From these steps, potential bottlenecks can already be identified:
+
+\begin{itemize}
+
+	\item The time it takes to a segment is inherently determined by the available network bandwidth from S3 to the EMR cluster.
+	\item Decompression is a relatively compute-intensive operation, the performance of which will be limited by the available hardware and used decompression library.
+	\item Extracting phone numbers might be compute-intensive as relatively inefficient regular expressions are used in the process.
+	\item As these computations are performed in-memory, memory latency and bandwidth might limit performance.
+	\item Grouping data involves communication between individual workers, which implies intra-cluster networking overhead.
+	\item Storing the results takes time depending on the bandwidth of the storage medium.
+\end{itemize}
+
+The first four of this issues are deemed important enough to investigate further, but as the volume of the resulting data (phone numbers and URLs) is expected to be fairly manageable (small), the performance impact of both grouping and storing data should be marginal and is therefore not considered further.
+
+\section{Optimisation}
+
+The bottlenecks identified in the previous section can be simply ascribed to networking, memory and compute performance.
+There are several aspects of the process that can be improved to attain higher application performance:
+
+\begin{itemize}
+	\item The hardware the application runs on
+	\item The way Spark is configured to run the application
+	\item The application itself
+\end{itemize}
+
+Now, upgrading hardware can alleviate all three of the mentioned bottlenecks, whereas configuring Spark is most likely to improve memory and computational performance, and optimising the application itself can lift some of the computational burden.
+The rest of this section will give an overview of the choices that were made with respect to these three aspects.
+
+\subsection{Hardware}
+Amazon's current generation of EC2 instance types gives the user a choice between 13 different machine types, every one of which is focused on a different type of application
+The machines are grouped in five categories, namely 'General Purpose', 'Compute Optimized', 'Memory Optimized', 'Accelerated Computing' and 'Storage Optimized'.
+Furthermore, every instance type itself can be of several 'sizes', which mostly indicates the amount of available CPU cores and memory \cite{amazon2017instance}.
+
+For an make an initial selection of which machines are interesting, we argue that machines under the 'Accelerated Computing' category are not relevant as the target application cannot make use of GPUs, and certainly not FPGAs, ruling out the P2, G3 and F1 types. Then, as the amount of persistent storage is hardly an issue, we may rule out the D2 'Dense Storage' instance as well. Next, the X1 instance provides extremely high amounts of RAM, CPU cores and fast SSD storage per instance, but comes at a hefty price. We speculate the application will be unable to utilize all this hardware effectively and therefore rule it out. The T2 instance is meant to provide low baseline performance with relatively limited hardware, but can boost up its clock frequency according to a CPU credit system whenever additional performance is required. Note that this is hardly our use case, but rather something interesting for a web server, so the T2 is also not considered. Finally, as the M3, C3 and R3 instance feature SSD storage at the expense of older hardware with respect to their newer counterparts, we also do not include them.
+
+This leaves us with the general purpose M4, compute optimised C4, memory optimised and R4, and storage optimised I3.
+As efficient storage is not deemed a requirement, the I3 might seem like an odd choice, but it also happens to feature very fast networking capabilities (similar to the R4), which makes it interesting anyway.
+As an early hypothesis, we expect either the C4 or R4 to be the fastest.
+Whichever wins will give an indication whether computation (C4) or memory/networking (R4) is the dominant factor.
+They are likely followed by the I3 with its fast networking, whereas the M4 is expected to be slowest.
+
+Test results for a single machine featuring 8 vCPUs (hyperthreads) are shown in \cref{tab:single-instance}.
+
+% TODO: Replace this with results for 2048 segments and 16 instances?
+\begin{table}[H]
+	\centering
+	\caption{Accumulative completion times of the various steps of the map phase and the total application time for relevant instance types @ 8 vCPUs and 128 segments}
+	\label{tab:single-instance}
+
+	\begin{tabular}{lrrrrr}
+	\toprule
+	Instance	& D/L [s]	& Decompr. [s]	& Parse [s] & Total [s]	\\
+	\midrule
+	r4.2xlarge	& 163.558	& 415.329		& 295.477	& 180.273 	\\
+	i3.2xlarge	& 175.182	& 410.549		& 292.959	& 186.429	\\
+	m4.2xlarge	& 421.543	& 375.779		& 255.281	& 215.156	\\
+	c4.2xlarge	& 172.387	& 281.658		& 172.199	& 181.939	\\
+	\bottomrule
+	\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=0.8\textwidth]{resource/r4-scaling.pdf}
+	\caption{Performance scaling for various R4 models}
+	\label{fig:r4-scaling}
+\end{figure}
+
+\subsection{Spark}
+% TODO: Spark config: executors, cores, mem per executor, partitioning, etcetera.
+
+\subsection{The application}
+% TODO: Parser specifics.
+
+
+\section{Results}
+% TODO: Add results with 40 instances.
+
+
+
+\printbibliography
+\end{document}
