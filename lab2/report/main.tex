@@ -127,18 +127,19 @@ The module will decompress the full segment to memory and parse the segment byte
 It outputs a list of phone number and url tuples back to python to be picked up by Pyspark.
 
 The implementation is not perfect, initially the full extent of correct Dutch phone number recognition was implemented.
-Including special numbers, non-international numbers (checked for correct area codes) and international numbers.
+Including special numbers, domestic formatted numbers (checked for correct area codes) and international formatted numbers.
 This resulted in huge result sets due to the omnipresence of numbers like 112, 144, 14x(xx) 16xx and 18xx.
 So the lists in the tuples with those numbers reached huge sizes, slowing down processing a lot.
 This in turn made the final 'save' stage take almost longer than the compute stages.
-So they were taken out and the non-international numbers were taken out as well, as well as some area codes that are reserved for special this like 044.
-Due to the filtering on correct area codes the new implementation actually finds fewer phone numbers then the original regex based implementation.
+So they and the non-international numbers were taken out, as well as some area codes that are reserved for special use like 044.
+Due to the filtering of incorrect area codes the new implementation actually finds fewer phone numbers then the original regex based implementation.
 The filtering is implemented using a lookup table and a simple key making function.
+Incurring an immeasurable performance hit.
 
-More performance can be gained by switching out zlib for a faster alternative such as the Intel zlib fork or for example libdeflate.
-And by making the module fully streaming compatible, so it can process while it reads the data in smaller chunks.
+More performance can be gained by switching out zlib for a faster alternative such as the Intel zlib fork as a drop-in replacement or for example libdeflate.
+And by making the module fully streaming compatible, so it can process while it reads or downloads the data in smaller chunks.
 The streaming part is especially important to lower the memory footprint.
-BUt also to mitigate the horrendously slow throughput from S3.
+But also to mitigate the horrendously slow throughput from S3.
 This would eliminate the processing times that are incurred now entirely, because the current implementation is fast enough to never choke on the download speed from S3.
 But for this lab it was not really seen as appropiate to invest a lot of time into this.
 As usual you trade compute time for development time.
