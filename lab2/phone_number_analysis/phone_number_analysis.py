@@ -66,6 +66,9 @@ class PhoneNumbers:
         self.failed_segment = sc.accumulator(0)
         self.download_time = sc.accumulator(0.0)
         self.process_time = sc.accumulator(0.0)
+        self.process_time_c = sc.accumulator(0.0)
+        self.init_decompress_time_c = sc.accumulator(0.0)
+        self.cleanup_delete_time_c = sc.accumulator(0.0)
         self.segments = sc.accumulator(0)
 
         sqlc = SQLContext(sparkContext=sc)
@@ -95,8 +98,11 @@ class PhoneNumbers:
 
         self.log(sc, "Found {} unique phone numbers in total in {} segments, processed in {} and written in {} partitions.".format(phone_numb_agg_web.count(), self.segments.value, usedpartitions, phone_numb_agg_web.getNumPartitions()))
         self.log(sc, "New implementation took: {:.3f} seconds.".format(t1-t0))
-        self.log(sc, "Download took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.download_time.value, self.download_time.value/usedpartitions, self.download_time.value/self.segments.value))
-        self.log(sc, "Processing took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segement.".format(self.process_time.value, self.process_time.value/usedpartitions, self.process_time.value/self.segments.value))
+        self.log(sc, "Download took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segment.".format(self.download_time.value, self.download_time.value/usedpartitions, self.download_time.value/self.segments.value))
+        self.log(sc, "Processing took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segment.".format(self.process_time.value, self.process_time.value/usedpartitions, self.process_time.value/self.segments.value))
+        self.log(sc, "C Init+CheckFile+Decompression took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segment.".format(self.init_decompress_time_c.value, self.init_decompress_time_c.value/usedpartitions, self.init_decompress_time_c.value/self.segments.value))
+        self.log(sc, "C Processing took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segment.".format(self.process_time_c.value, self.process_time_c.value/usedpartitions, self.process_time_c.value/self.segments.value))
+        self.log(sc, "C Cleanup+Deletefile took: {0:.3f} seconds or {1:.3f} seconds per partition and {2:.3f} per segment.".format(self.cleanup_delete_time_c.value, self.cleanup_delete_time_c.value/usedpartitions, self.cleanup_delete_time_c.value/self.segments.value))
         self.log(sc, "Processed segments: {}".format(self.segments.value-self.failed_segment.value))
         self.log(sc, "Failed segments: {}".format(self.failed_segment.value))
 
@@ -130,9 +136,12 @@ class PhoneNumbers:
             res = []
 
         self.segments.add(1)
+        self.init_decompress_time_c.add(res[1]/1e9)
+        self.process_time_c.add(res[2]/1e9)        
+        self.cleanup_delete_time_c.add(res[3]/1e9)
         self.download_time.add(t_mid - t_start)
         self.process_time.add(t_end - t_mid)
-        return res
+        return res[0]
 
 
     def process_s3_warc(self, uri):

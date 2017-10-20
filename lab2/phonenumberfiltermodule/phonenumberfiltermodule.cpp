@@ -1,6 +1,7 @@
 #include <Python.h>
 #include <fstream>
 #include "prefixes.h"
+#include "timing.h"
 #define GZSTREAM_NAMESPACE gz
 #include "gzstream.h"
 #define HEADER_MATCH "WARC-Target-URI:"
@@ -180,6 +181,14 @@ static void process_data(char * data, PyObject* out, size_t size) {
                             add_to_phonenumber('0');
                             i += 3;
                         }
+                        /*else if ((data[i + 1] == '8' || data[i + 1] == '9') && data[i + 2] == '0'&&data[i + 3] == '0') {
+                            in_phonenumber = true;
+                            add_to_phonenumber('0');
+                            add_to_phonenumber(data[i + 1]);
+                            add_to_phonenumber('0');
+                            add_to_phonenumber('0');
+                            i += 3;
+                        }*/
                     }
                     else if (data[i] == '+') {
                         if ((data[i + 1] == '3'&&data[i + 2] == '1')) {
@@ -227,12 +236,14 @@ static PyObject * read_data(const char* filename, bool usecompression, bool dele
         std::cout << "Processing compressed file: " << filename << std::endl;
     else
         std::cout << "Processing file: " << filename << std::endl;*/
+    perftime_t t0, t1, t2, t3;
+    t0 = now();
     if (!file_exists(filename)) {
         char errorbuf[1024];
         snprintf(errorbuf, 1024, "File %s does not exist.", filename);
         PyErr_SetString(PhoneNumberFilterError, errorbuf);
         return NULL;
-    }
+    }  
     std::istream * is;
     if (usecompression) {
         is = new gz::igzstream(filename);
@@ -247,13 +258,14 @@ static PyObject * read_data(const char* filename, bool usecompression, bool dele
         // Load the data
         is->read(buffer, STARTBUFFERSIZE);
         size_t size = is->gcount();
-
+        t1 = now();
         reset_all();
         PyObject *list = PyList_New(0);
         process_data(buffer, list, size);
-
+        t2 = now();
         delete[] buffer;
         delete is;
+        
         if (deletefilewhendone) {
             if (remove(filename) != 0) {
                 //std::cout << "Could not remove file " << filename << " after processing." << std::endl;
@@ -265,7 +277,8 @@ static PyObject * read_data(const char* filename, bool usecompression, bool dele
         else {
             //std::cout << "Leaving file " << filename << " after processing." << std::endl;
         }
-        return list;
+        t3 = now();
+        return PyTuple_Pack(4, list, PyFloat_FromDouble(diffToNanoseconds(t0, t1)), PyFloat_FromDouble(diffToNanoseconds(t1, t2)), PyFloat_FromDouble(diffToNanoseconds(t2, t3)));;
     }
     else {
         char errorbuf[1024];
