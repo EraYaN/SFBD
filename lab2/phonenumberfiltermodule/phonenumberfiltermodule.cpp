@@ -7,7 +7,7 @@
 #define HEADER_MATCH "WARC-Target-URI:"
 #define HEADER_MATCH_SIZE 16
 #define STARTBUFFERSIZE 450000000
-#define URLBUFFERSIZE 8192
+#define URLBUFFERSIZE 8193
 #define PHONENUMBERBUFFERSIZE 64
 
 static PyObject *
@@ -135,11 +135,17 @@ static void process_data(char * data, PyObject* out, size_t size) {
             if (memcmp(&data[i], HEADER_MATCH, HEADER_MATCH_SIZE) == 0) {
                 i += HEADER_MATCH_SIZE + 1;
                 int old_i = i;
-                while (data[i] != newline && data[i] != carriagereturn) {
+                while (data[i] != newline && data[i] != carriagereturn && i < size) {
                     i++;
                 }
-                memcpy(current_url, &data[old_i], i - old_i);
-                current_url[i - old_i] = '\0';
+                if (i - old_i < URLBUFFERSIZE-1) {
+                    memcpy(current_url, &data[old_i], i - old_i);
+                    current_url[i - old_i] = '\0';
+                }
+                else {
+                    memcpy(current_url, &data[old_i], URLBUFFERSIZE-1);
+                    current_url[URLBUFFERSIZE-1] = '\0';
+                }                
                 has_url = true;
             }
             seenothercharacter = true;
