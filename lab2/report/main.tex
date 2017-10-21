@@ -73,6 +73,60 @@ There are several aspects of the process that can be improved to attain higher a
 Now, upgrading hardware can alleviate all three of the mentioned bottlenecks, whereas configuring Spark is most likely to improve memory and computational performance, and optimising the application itself can lift some of the computational burden.
 The rest of this section will give an overview of the choices that were made with respect to these three aspects.
 
+\subsection{Spark}
+Configuring Spark for high performance can be a pain, but several guidelines exist.
+\Cref{tab:spark-config} lists the parameters as they were used for the \texttt{spark-submit} command.
+
+\begin{table}[H]
+	\caption{Spark configuration}
+	\label{tab:spark-config}
+	\centering
+
+	\begin{tabular}{llp{6cm}}
+	\toprule
+	Parameter					& Value	& Explanation \\
+	\midrule
+	\texttt{--deploy-mode} 		& \texttt{cluster}				& The application master should run on a separate node. \\
+	\texttt{--num-executors}	& \# vCPUs		  				& Every vCPU should have at most five executor cores, but a single one is fine when multiple are not required. \\
+	\texttt{--executor-cores}	& 1								& See above. \\
+	\texttt{--executor-memory}	& $\frac{\text{total memory}}{\text{1.1} \times \text{\# vCPUs}}$	& Spark takes \SI{10}{\percent} of memory as overhead and the rest can be shared among all executors. \\
+	\texttt{--driver-cores}		& 1								& No more are required as the application requires little coordination. \\
+	\texttt{--driver-memory}	& 2G							& See above. \\
+	\bottomrule
+	\end{tabular}
+\end{table}
+
+The number of partitions (application \texttt{-p} parameter) is equal to twice the total number of vCPUs in the cluster.
+
+\subsection{The application}
+The original implementation uses a regular expression to match all Dutch phone numbers in the international format.
+Regular expressions are notoriously compute-heavy, so it was an easy target for optimisation.
+The replacement is a set of tight loops in a purpose built python C-module.
+This alone speeds up the application greatly, and also shifts most of the bottleneck to decompression, networking and IO.
+Python passes in a temporary file name, to which the downloaded S3 segment was written.
+The module will decompress the full segment to memory and parse the segment byte for byte.
+It outputs a list of (phone number, URL) tuples back to python to be picked up by Pyspark.
+
+The implementation is not perfect.
+Initially the full extent of correct Dutch phone number recognition was implemented.
+This includes special numbers, domestic formatted numbers (checked for correct area codes) and international formatted numbers.
+This resulted in huge result sets with many false-positives due to the omnipresence of numbers like 112, 144, 14x(xx) 16xx and 18xx.
+Therefore, the lists in the tuples with those common numbers reached huge sizes, skewing the dataset and slowing down processing a lot.
+This in turn made the final 'save' stage take almost longer than the compute stages.
+It was therefore decided to keep the requirement that numbers be prefixed by +31 or 0031.
+Due to the filtering of incorrect area codes the new implementation actually finds fewer phone numbers then the original regex based implementation.
+The filtering is implemented using a lookup table and a simple key making function.
+Implemented in this manner, prefix filtering does not incur a measurable performance hit.
+
+A quick comparison for running the application on different numbers of segments is shown in \cref{fig:impl-scaling}, using locally available archive data. Clearly, the new parser is much faster.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{resource/impl-scaling.pdf}
+    \caption{Performance from the new and the old implementation, running with 16 partitions on a local machine and local data.}
+    \label{fig:impl-scaling}
+\end{figure}
+
 \subsection{Hardware}
 Amazon's current generation of EC2 instance types gives the user a choice between 13 different machine types, every one of which is focused on a different type of application
 The machines are grouped in five categories, namely 'General Purpose', 'Compute Optimized', 'Memory Optimized', 'Accelerated Computing' and 'Storage Optimized'.
@@ -83,77 +137,77 @@ For an make an initial selection of which machines are interesting, we argue tha
 This leaves us with the general purpose M4, compute optimised C4, memory optimised and R4, and storage optimised I3.
 As efficient storage is not deemed a requirement, the I3 might seem like an odd choice, but it also happens to feature very fast networking capabilities (similar to the R4), which makes it interesting anyway.
 As an early hypothesis, we expect either the C4 or R4 to be the fastest.
-Whichever wins will give an indication whether computation (C4) or memory/networking (R4) is the dominant factor.
-They are likely followed by the I3 with its fast networking, whereas the M4 is expected to be slowest.
+Whichever is faster will give an indication whether computation (C4) or memory (R4) is the dominant factor.
+They are likely followed by the I3, whereas the M4 is expected to be slowest.
 
-Test results for a single machine featuring 8 vCPUs (hyperthreads) are shown in \cref{tab:single-instance}.
+Test results for a single machine featuring a total of 128 vCPUs (hyperthreads) are shown in \cref{tab:instance-comparison}. Note that these results were obtained using the previously described software optimisations
 
-% TODO: Replace this with results for 2048 segments and 16 instances?
 \begin{table}[H]
 	\centering
-	\caption{Accumulative completion times of the various steps of the map phase and the total application time for relevant instance types @ 8 vCPUs and 128 segments}
-	\label{tab:single-instance}
+	\caption{Accumulated completion times of the various steps of the map phase among all vCPUs and the total real application time for relevant instance types @ 16 instances, 8 vCPUs per instance and 2048 total segments}
+	\label{tab:instance-comparison}
 
 	\begin{tabular}{lrrrrr}
 	\toprule
-	Instance	& D/L [s]	& Decompr. [s]	& Parse [s] & Total [s]	\\
+	Instance	& 	Downl. [s]	& Decompr. [s]	& Parse [s] 	& Total [s]	\\
 	\midrule
-	r4.2xlarge	& 163.558	& 415.329		& 295.477	& 180.273 	\\
-	i3.2xlarge	& 175.182	& 410.549		& 292.959	& 186.429	\\
-	m4.2xlarge	& 421.543	& 375.779		& 255.281	& 215.156	\\
-	c4.2xlarge	& 172.387	& 281.658		& 172.199	& 181.939	\\
+	% r4.2xlarge	& 163.558	& 415.329		& 295.477	& 180.273 	\\
+	% i3.2xlarge	& 175.182	& 410.549		& 292.959	& 186.429	\\
+	% m4.2xlarge	& 421.543	& 375.779		& 255.281	& 215.156	\\
+	% c4.2xlarge	& 172.387	& 281.658		& 172.199	& 181.939	\\
+	r4.2xlarge	&	3038.469	&	7233.797	&	5337.899	&	252.323 \\
+	i3.2xlarge	&	2908.101	&	7223.631	&	5322.268	&	261.525 \\
+	m4.2xlarge	&	4842.310	&	5687.446	&	3672.714	&	315.539 \\
+	c4.2xlarge	&	4112.324	&	5148.951	&	3419.514	&	247.146 \\
 	\bottomrule
 	\end{tabular}
 \end{table}
 
+Observe how the C4, R4 and I3 instances are practically equally fast, with the M4 bringing up the rear as expected.
+Moreover, note that the C4 and R4 spend about equal amounts of time on every single stage, implying these machines are very similar to each other.
+Indeed, upon having a closer look at their specifications, it appears the I3 is exactly equal to an R4, with added fast SSD storage, making it more expensive (as a spot instance even more so than on-demand).
+Furthermore, although the C4 instance is as fast as the R4 and I3, it actually spends more time downloading and significantly less time decompressing and parsing.
+Although the latter is to be expected, the fact that it is not faster than the other instances implies a significant networking bottleneck.
+The same holds for the M4, but this machine does not have the computational abilities to make up for its lower network bandwidth and is therefore slower.
+
+As a final investigation we look at the amount of vCPUs per instance that delivers the best performance.
+One may suspect that higher download speeds can be reached when using multiple small machines, each with a dedicated connection as opposed to using fewer big machines, that share a connection.
+As the application is network limited, this would have a profound effect on performance.
+\Cref{fig:r4-scaling} gives an indication of how performance scales with the amount of cores per instance.
+
 \begin{figure}[H]
 	\centering
 	\includegraphics[width=0.8\textwidth]{resource/r4-scaling.pdf}
-	\caption{Performance scaling for various R4 models}
+	\caption{Total real application time and average download and processing times per segment among all cores for R4 models with 8, 16, 32, and 64 vCPUs}
 	\label{fig:r4-scaling}
 \end{figure}
 
-\subsection{Spark}
-% TODO: Spark config: executors, cores, mem per executor, partitioning, etcetera.
-
-\subsection{The application}
-% TODO: Parser specifics.
-The original implementation used a regular expression to match all Dutch phone numbers in the international format.
-Regular expressions are notoriously compute heavy, so it was an easy target in the application for optimisation.
-The replacement is a set of tight loops in a purpose built python C-module.
-This alone speeds up the application greatly, and also shifts most of the bottleneck to decompression, networking and IO.
-Python passes in a temporary file name, to which the downloaded S3 segment was written.
-The module will decompress the full segment to memory and parse the segment byte for byte.
-It outputs a list of phone number and url tuples back to python to be picked up by Pyspark.
-
-The implementation is not perfect, initially the full extent of correct Dutch phone number recognition was implemented.
-Including special numbers, domestic formatted numbers (checked for correct area codes) and international formatted numbers.
-This resulted in huge result sets due to the omnipresence of numbers like 112, 144, 14x(xx) 16xx and 18xx.
-So the lists in the tuples with those numbers reached huge sizes, slowing down processing a lot.
-This in turn made the final 'save' stage take almost longer than the compute stages.
-So they and the non-international numbers were taken out, as well as some area codes that are reserved for special use like 044.
-Due to the filtering of incorrect area codes the new implementation actually finds fewer phone numbers then the original regex based implementation.
-The filtering is implemented using a lookup table and a simple key making function.
-Incurring an immeasurable performance hit.
-
-More performance can be gained by switching out zlib for a faster alternative such as the Intel zlib fork as a drop-in replacement or for example libdeflate.
-And by making the module fully streaming compatible, so it can process while it reads or downloads the data in smaller chunks.
-The streaming part is especially important to lower the memory footprint.
-But also to mitigate the horrendously slow throughput from S3.
-This would eliminate the processing times that are incurred now entirely, because the current implementation is fast enough to never choke on the download speed from S3.
-But for this lab it was not really seen as appropiate to invest a lot of time into this.
-As usual you trade compute time for development time.
-A quick comparison for running the application on different numbers of segments is shown in \cref{fig:impl-scaling}.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{resource/impl-scaling.pdf}
-    \caption{Performance from the new and the old implementation, running with 16 partitions on a local machine.}
-    \label{fig:impl-scaling}
-\end{figure}
+Note that download times increase linearly with the amount of vCPUs per instance, whereas processing times stay relatively constant.
+It can be seen this influences the total execution time significantly, as expected, and that smaller instances are therefore the better choice.
+This was further confirmed by inspection of the Ganglia monitor, which showed decreasing network bandwidth usage and suboptimal CPU utilization for clusters of higher amounts of vCPUs.
 
 \section{Results}
-% TODO: Add results with 40 instances.
+As a final measurement we combine the insights from the previous segments to process the entire \num{72000} segment dataset.
+The goal will be to process the whole dataset in about an hour.
+As the C4, R4 and I3 instances perform equally well, we pick the C4 instance type as it is the cheapest available.
+The instance size scaling analysis for the R4 machine from \cref{fig:r4-scaling} is expected to hold for other instance types as well, so the c4.2xlarge with 8 vCPUs is deemed the best choice.
+
+To provide an estimate of the amount of instances that are required to finish within an hour, we calculate the time per segment for a single instance from the results from \cref{tab:instance-comparison}, multiply by the total amount of segments and divide by one hour and round up the result:
+
+\begin{align*}
+	\#_{\text{instances, required}} &= \left\lceil\frac{t_{\text{total}} / \#_{\text{segments}} \cdot \#_{\text{instances, used}} \cdot \#_{\text{segments, total}}}{t_{\text{desired}}}\right\rceil \\
+	&= \left\lceil\frac{250 / 2048 \cdot 16 \cdot 72000}{3600}\right\rceil \\
+	&= 40.
+\end{align*}
+
+\section{Conclusion}
+
+\subsection{Recommendations}
+More performance can be gained by switching out the \texttt{zlib} decompression library for a faster alternative such as the Intel \texttt{zlib} fork, as a drop-in replacement or for example using \texttt{libdeflate}.
+Performance may also be improved by making the module fully streaming compatible, so it can process while it reads or downloads the data in smaller chunks, interleaving the download and computational process.
+The streaming part is especially important to lower the memory footprint, but also to mitigate the horrendously slow throughput from S3.
+This would eliminate the processing times that are incurred now entirely, because the current implementation is fast enough to never choke on the download speed from S3.
+For this lab it was not really seen as appropriate to invest a lot of time into this, for as usual one trades compute time for development time.
 
 
 \printbibliography
