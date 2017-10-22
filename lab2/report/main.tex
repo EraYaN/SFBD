@@ -18,8 +18,8 @@ The aim of the assignment is to optimise the given big data application that is 
 This metric might be cost, execution time, computational efficiency or anything else that is deemed relevant.
 
 This report will first present a brief analysis of the application, in which possible performance bottlenecks will be identified.
-Consequently, this analysis will be used to formulate two independent optimisation strategies along with hypotheses on their effects and any interesting implementation details.
-A third section lists the obtained results for the final choice of architecture, after which the report is concluded by a brief summary and future recommendations.
+Consequently, this analysis will be used to formulate independent optimisation strategies along with a discussion on their effects and any interesting implementation details.
+The consecutive section lists the obtained results for the final choice of architecture, after which the report is concluded by a brief summary and future recommendations.
 
 \section{Phone number analysis}
 The entire process is of the form of the standard big data pipeline, meaning it can be divided in five consequent stages: Sense/Acquire, Store/Ingest, Retrieve/Filter, Analyse, and Visualise.
@@ -86,12 +86,12 @@ Configuring Spark for high performance can be a pain, but several guidelines exi
 	\toprule
 	Parameter					& Value	& Explanation \\
 	\midrule
-	\texttt{--deploy-mode} 		& \texttt{cluster}				& The application master should run on a separate node. \\
-	\texttt{--num-executors}	& \# vCPUs		  				& Every vCPU should have at most five executor cores, but a single one is fine when multiple are not required. \\
-	\texttt{--executor-cores}	& 1								& See above. \\
-	\texttt{--executor-memory}	& $\frac{\text{total memory}}{\text{1.1} \times \text{\# vCPUs}}$	& Spark takes \SI{10}{\percent} of memory as overhead and the rest can be shared among all executors. \\
-	\texttt{--driver-cores}		& 1								& No more are required as the application requires little coordination. \\
-	\texttt{--driver-memory}	& 2G							& See above. \\
+	\texttt{-{}-deploy-mode} 		& \texttt{cluster}				& The application master should run on a separate node. \\
+	\texttt{-{}-num-executors}	& \# vCPUs		  				& Every vCPU should have at most five executor cores, but a single one is fine when multiple are not required. \\
+	\texttt{-{}-executor-cores}	& 1								& See above. \\
+	\texttt{-{}-executor-memory}	& $\frac{\text{total memory}}{\text{1.1} \times \text{\# vCPUs}}$	& Spark takes \SI{10}{\percent} of memory as overhead and the rest can be shared among all executors. \\
+	\texttt{-{}-driver-cores}		& 1								& No more are required as the application requires little coordination. \\
+	\texttt{-{}-driver-memory}	& 2G							& See above. \\
 	\bottomrule
 	\end{tabular}
 \end{table}
@@ -200,14 +200,40 @@ To provide an estimate of the amount of instances that are required to finish wi
 	&= 40.
 \end{align*}
 
+As spot instances of the c4.2xlarge machine can generally be had for \$ 0.11 + \$ 0.105 = \$ 0.215 an hour (EC2 + EMR fees), this is expected to cost an estimated \$ 8.60, which is considered quite reasonable.
+The final results are shown in \cref{tab:final-run}.
+
+\begin{table}[H]
+	\centering
+	\caption{Results of the final \num{72000} segment run}
+	\label{tab:final-run}
+
+	\begin{tabular}{lc}
+	\toprule
+	Unique phone numbers			& \num{383288} \\
+	Measured execution time			& \SI{2380.778}{\second} (\SI{39.85}{\minute}) \\
+	Billed c4.2xlarge compute time	& \SI{33.31}{\hour} \\
+	Estimated total cost			& \$ 6.60 \\
+	\bottomrule
+	\end{tabular}
+\end{table}
+
+Note the completion time that is only two-thirds of what was estimated.
+This might be explained by reduced relative overhead and ramp-up/ramp-down effects during the starting and stopping of the cluster.
+Ganglia showed a peak bandwidth of \SI{5.6}{GB\per\second}, which is in agreement with previous observations that give an estimate of about \SI{130}{MB\per\second} per single instance.
+During the run, cluster load was at an average of \SI{75}{\percent}, again confirming a networking bottleneck.
+Compared to the given reference run of about \SI{1.75}{\hour}, at an estimated cost of around \$ 35, we have managed to reduce execution time by over \SI{60}{\percent} at less than a fifth of the cost.
+
 \section{Conclusion}
+It was shown that by careful optimisation and profiling of a big data application, it is possible to greatly reduce both execution time and cost, limited only by the amount of time it takes to move data from off-site storage to the cluster.
+Optimisations like this are especially helpful for applications that are run on a regular basis, minimising the relative cost of development.
+
 
 \subsection{Recommendations}
-More performance can be gained by switching out the \texttt{zlib} decompression library for a faster alternative such as the Intel \texttt{zlib} fork, as a drop-in replacement or for example using \texttt{libdeflate}.
+Further effort should mostly go into reducing the impact of the inevitable networking bottleneck. More performance at the processing side of the application can be gained by switching out the \texttt{zlib} decompression library for a faster alternative such as the Intel \texttt{zlib} fork, as a drop-in replacement or for example using \texttt{libdeflate}.
 Performance may also be improved by making the module fully streaming compatible, so it can process while it reads or downloads the data in smaller chunks, interleaving the download and computational process.
 The streaming part is especially important to lower the memory footprint, but also to mitigate the horrendously slow throughput from S3.
 This would eliminate the processing times that are incurred now entirely, because the current implementation is fast enough to never choke on the download speed from S3.
-For this lab it was not really seen as appropriate to invest a lot of time into this, for as usual one trades compute time for development time.
 
 
 \printbibliography
