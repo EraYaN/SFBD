@@ -7,7 +7,7 @@
 #define HEADER_MATCH "WARC-Target-URI:"
 #define HEADER_MATCH_SIZE 16
 #define STARTBUFFERSIZE 450000000
-#define URLBUFFERSIZE 8193
+#define URLBUFFERSIZE 2049
 #define PHONENUMBERBUFFERSIZE 64
 
 static PyObject *
@@ -145,7 +145,7 @@ static void process_data(char * data, PyObject* out, size_t size) {
                 else {
                     memcpy(current_url, &data[old_i], URLBUFFERSIZE-1);
                     current_url[URLBUFFERSIZE-1] = '\0';
-                }                
+                }
                 has_url = true;
             }
             seenothercharacter = true;
@@ -222,7 +222,7 @@ static void process_data(char * data, PyObject* out, size_t size) {
                 if (in_phonenumber) {
                     if (phone_idx == 8 || phone_idx == 11) {
                         if ((current_phone[1] == '8' || current_phone[1] == '9') && current_phone[2] == '0' && current_phone[3] == '0') {
-                            //0800/0900 number 
+                            //0800/0900 number
                             write_to_output(out);
                         }
                     }
@@ -249,7 +249,7 @@ static PyObject * read_data(const char* filename, bool usecompression, bool dele
         snprintf(errorbuf, 1024, "File %s does not exist.", filename);
         PyErr_SetString(PhoneNumberFilterError, errorbuf);
         return NULL;
-    }  
+    }
     std::istream * is;
     if (usecompression) {
         is = new gz::igzstream(filename);
@@ -271,7 +271,7 @@ static PyObject * read_data(const char* filename, bool usecompression, bool dele
         t2 = now();
         delete[] buffer;
         delete is;
-        
+
         if (deletefilewhendone) {
             if (remove(filename) != 0) {
                 //std::cout << "Could not remove file " << filename << " after processing." << std::endl;
