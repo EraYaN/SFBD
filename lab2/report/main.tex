@@ -22,7 +22,7 @@ Consequently, this analysis will be used to formulate independent optimisation s
 The consecutive section lists the obtained results for the final choice of architecture, after which the report is concluded by a brief summary and future recommendations.
 
 \section{Phone number analysis}
-The entire process is of the form of the standard big data pipeline, meaning it can be divided in five consequent stages: Sense/Acquire, Store/Ingest, Retrieve/Filter, Analyse, and Visualise.
+The entire process takes the form of the standard big data pipeline, meaning it can be divided in these five consequent stages: Sense/Acquire, Store/Ingest, Retrieve/Filter, Analyse, and Visualise.
 Both the sense and store stage have been previously performed, resulting in the Common Crawl as it is provided to the user.
 The plain-text part of it consists of a large number of segments that each contain part of the entire set.
 The September 2017 (week 39) crawl that will be used in this assignment consists of \num{72000} compressed segments of around \SI{130}{MB} each, making for a total of \SI{8.86}{TB} of compressed data \cite{commoncrawl2017september}.
@@ -49,7 +49,7 @@ From these steps, potential bottlenecks can already be identified:
 
 \begin{itemize}
 
-	\item The time it takes to a segment is inherently determined by the available network bandwidth from S3 to the EMR cluster.
+	\item The time it takes to a segment is inherently determined by the available network bandwidth from S3 to the EC2 instances.
 	\item Decompression is a relatively compute-intensive operation, the performance of which will be limited by the available hardware and used decompression library.
 	\item Extracting phone numbers might be compute-intensive as relatively inefficient regular expressions are used in the process.
 	\item As these computations are performed in-memory, memory latency and bandwidth might limit performance.
@@ -102,7 +102,7 @@ The number of partitions (application \texttt{-p} parameter) is equal to twice t
 The original implementation uses a regular expression to match all Dutch phone numbers in the international format.
 Regular expressions are notoriously compute-heavy, so it was an easy target for optimisation.
 The replacement is a set of tight loops in a purpose built python C-module.
-This alone speeds up the application greatly, and also shifts most of the bottleneck to decompression, networking and IO.
+This alone speeds up the application by a large margin, and also shifts most of the bottleneck to decompression, networking and IO.
 Python passes in a temporary file name, to which the downloaded S3 segment was written.
 The module will decompress the full segment to memory and parse the segment byte for byte.
 It outputs a list of (phone number, URL) tuples back to python to be picked up by Pyspark.
@@ -128,19 +128,25 @@ A quick comparison for running the application on different numbers of segments 
 \end{figure}
 
 \subsection{Hardware}
-Amazon's current generation of EC2 instance types gives the user a choice between 13 different machine types, every one of which is focused on a different type of application
+Amazon's current generation of EC2 instance types gives the user a choice between 13 different machine types, every one of which is focused on a different type of application.
 The machines are grouped in five categories, namely 'General Purpose', 'Compute Optimized', 'Memory Optimized', 'Accelerated Computing' and 'Storage Optimized'.
 Furthermore, every instance type itself can be of several 'sizes', which mostly indicates the amount of available CPU cores and memory \cite{amazon2017instance}.
 
-For an make an initial selection of which machines are interesting, we argue that machines under the 'Accelerated Computing' category are not relevant as the target application cannot make use of GPUs, and certainly not FPGAs, ruling out the P2, G3 and F1 types. Then, as the amount of persistent storage is hardly an issue, we may rule out the D2 'Dense Storage' instance as well. Next, the X1 instance provides extremely high amounts of RAM, CPU cores and fast SSD storage per instance, but comes at a hefty price. We speculate the application will be unable to utilize all this hardware effectively and therefore rule it out. The T2 instance is meant to provide low baseline performance with relatively limited hardware, but can boost up its clock frequency according to a CPU credit system whenever additional performance is required. Note that this is hardly our use case, but rather something interesting for a web server, so the T2 is also not considered. Finally, as the M3, C3 and R3 instance feature SSD storage at the expense of older hardware with respect to their newer counterparts, we also do not include them.
+To make an initial selection of instance types that are interesting, we argue that instances under the 'Accelerated Computing' category are not relevant as the target application cannot make use of GPUs, and certainly not FPGAs, ruling out the P2, G3 and F1 types.
+Then, as the amount of persistent storage is hardly an issue, we may rule out the D2 'Dense Storage' instance as well.
+Next, the X1 instance provides extremely high amounts of RAM, CPU cores and fast SSD storage per instance, but comes at a hefty price.
+We speculate the application will be unable to utilize all this hardware effectively and therefore rule it out.
+The T2 instance is meant to provide low baseline performance with relatively limited hardware, but can boost up its clock frequency according to a CPU credit system whenever additional performance is required.
+Note that this is hardly our use case, but rather something interesting for a web server, so the T2 is also not considered.
+Finally, as the M3, C3 and R3 instance feature SSD storage at the expense of older hardware with respect to their newer counterparts, we also do not include them.
 
-This leaves us with the general purpose M4, compute optimised C4, memory optimised and R4, and storage optimised I3.
+This leaves us with the general purpose M4, compute optimised C4, memory optimised R4, and storage optimised I3.
 As efficient storage is not deemed a requirement, the I3 might seem like an odd choice, but it also happens to feature very fast networking capabilities (similar to the R4), which makes it interesting anyway.
 As an early hypothesis, we expect either the C4 or R4 to be the fastest.
 Whichever is faster will give an indication whether computation (C4) or memory (R4) is the dominant factor.
 They are likely followed by the I3, whereas the M4 is expected to be slowest.
 
-Test results for a single machine featuring a total of 128 vCPUs (hyperthreads) are shown in \cref{tab:instance-comparison}. Note that these results were obtained using the previously described software optimisations
+Test results for a cluster featuring a total of 128 vCPUs (hyperthreads) are shown in \cref{tab:instance-comparison}. Note that these results were obtained using the previously described software optimisations
 
 \begin{table}[H]
 	\centering
@@ -168,7 +174,7 @@ Moreover, note that the C4 and R4 spend about equal amounts of time on every sin
 Indeed, upon having a closer look at their specifications, it appears the I3 is exactly equal to an R4, with added fast SSD storage, making it more expensive (as a spot instance even more so than on-demand).
 Furthermore, although the C4 instance is as fast as the R4 and I3, it actually spends more time downloading and significantly less time decompressing and parsing.
 Although the latter is to be expected, the fact that it is not faster than the other instances implies a significant networking bottleneck.
-The same holds for the M4, but this machine does not have the computational abilities to make up for its lower network bandwidth and is therefore slower.
+The same holds for the M4, but this machine does not have the computational abilities to make up for its lower network bandwidth and is therefore slower overall.
 
 As a final investigation we look at the amount of vCPUs per instance that delivers the best performance.
 One may suspect that higher download speeds can be reached when using multiple small machines, each with a dedicated connection as opposed to using fewer big machines, that share a connection.
@@ -184,7 +190,7 @@ As the application is network limited, this would have a profound effect on perf
 
 Note that download times increase linearly with the amount of vCPUs per instance, whereas processing times stay relatively constant.
 It can be seen this influences the total execution time significantly, as expected, and that smaller instances are therefore the better choice.
-This was further confirmed by inspection of the Ganglia monitor, which showed decreasing network bandwidth usage and suboptimal CPU utilization for clusters of higher amounts of vCPUs.
+This was further confirmed by inspection of the Ganglia monitor, which showed decreasing network bandwidth usage and suboptimal CPU utilization for clusters of higher amounts of vCPUs per instance.
 
 \section{Results}
 As a final measurement we combine the insights from the previous segments to process the entire \num{72000} segment dataset.
@@ -211,7 +217,7 @@ The final results are shown in \cref{tab:final-run}.
 	\begin{tabular}{lc}
 	\toprule
 	Unique phone numbers			& \num{383288} \\
-	Measured execution time			& \SI{2380.778}{\second} (\SI{39.85}{\minute}) \\
+	Measured execution time			& \SI{2380.8}{\second} (\SI{39.85}{\minute}) \\
 	Billed c4.2xlarge compute time	& \SI{33.31}{\hour} \\
 	Estimated total cost			& \$ 6.60 \\
 	\bottomrule
