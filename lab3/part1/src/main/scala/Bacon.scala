@@ -5,8 +5,11 @@ import org.apache.spark.SparkContext._
 import org.apache.spark.SparkConf
 import org.apache.spark.scheduler._
 import org.apache.spark.storage.StorageLevel._
+import org.apache.spark._
 import org.apache.log4j.Logger
 import org.apache.log4j.Level
+import org.apache.spark.graphx._
+import org.apache.spark.rdd.RDD
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.mapreduce.Job
@@ -24,7 +27,9 @@ object Bacon
 	final val KevinBacon = "Bacon, Kevin (I)"	// This is how Kevin Bacon's name appears in the actors.list file
 	final val Infinite = 100
 	final val Distance = 6
-	final val compressRDDs = true
+	final val compressRDDs = false
+	final val useGraphX = false
+
 	val bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream("sparkLog.txt"), "UTF-8"))
 
 	def removeAfterDate(s: String) : String =
@@ -189,35 +194,100 @@ object Bacon
 		//(movie, (actor, actor))
 		val movie2ActorActor = movie2actor.join(movie2actor)
 		movie2ActorActor.setName("rdd_movie2ActorActor")
-		// (actor, actor)
-		val actor2actor = movie2ActorActor.map{case(m, (a1, a2)) => (a1, a2)}.filter(x => x._1 != x._2)
-		actor2actor.setName("rdd_actor2actor")
-		actor2actor.persist(if (compressRDDs) MEMORY_ONLY_SER else MEMORY_ONLY)
-		// (actor, actorlist)
-		// Sorting
-		val actor2listOfActors = actor2actor.groupByKey()
-		actor2listOfActors.setName("rdd_actor2listOfActors")
-		actor2listOfActors.persist(if (compressRDDs) MEMORY_ONLY_SER else MEMORY_ONLY)
-		// (actor, distance)
-		var actor2distance = actor2actor.map(x => (x._1, if (x._1 == KevinBaconID) 0 else Infinite))
-		actor2actor.unpersist()
 
 		val countListActors = ArrayBuffer[Long]()
 		val countListActresses = ArrayBuffer[Long]()
 		var dist = 0
-		var actorsAtDist: org.apache.spark.rdd.RDD[(Long, Int)] = null
-		for (dist <- 0 until Distance)
-		{
-			//(actor, (distance, actorlist))
-			var A2distanceAndLOA = actor2distance.join(actor2listOfActors)
-			actor2distance.unpersist()
+		var actorsAtDist: RDD[(Long, Int)] = null
+
+		if (useGraphX) {
+			// Construct vertices as (id, (name, distance)).
+			// The initial distance for Kevin Bacon is 0 and 'Infinite' for others.
+			val actors: RDD[(VertexId, (String, Int))] = actor2ListOfMovies1.map{
+				case((a, ml), i) => {
+					if (i != KevinBaconID) {
+						(i, (a, Infinite))
+					}
+					else {
+						(i, (a, 0))
+					}
+				}
+			}
+			// Construct edges as (id_actor1, id_actor2, collaboration)).
+			val collabs: RDD[Edge[String]] = movie2ActorActor.map{case(movie, (a1, a2)) => Edge(a1, a2, movie)}
+
+			// Create the graph.
+			val graph = Graph(actors, collabs)
+
+			// Traverse the graph at most 6 (Distance) times,
+			// performing a breadth-first search for the shortest path from Kevin Bacon,
+			// using the Pregel API.
+			val result = graph.pregel(Infinite, Distance) (
+				// vprog:
+				// Compute the new vertex data (name, distance) for this vertex
+				// from the distance through a neighboring vertex and the vertex'
+				// current distance from Kevin Bacon.
+				(_, actor, newDist) => (actor._1, math.min(actor._2, newDist)),
+				// sendMsg:
+				// If the distance from Kevin Bacon through this triplet is shorter
+				// than the current distance of the destination node, send the
+				// destination node a message with this distance.
+				triplet => {
+					if (triplet.srcAttr._2 + 1 < triplet.dstAttr._2) {
+						Iterator((triplet.dstId, triplet.srcAttr._2 + 1))
+					}
+					else {
+				    	Iterator.empty
+				  	}
+				},
+				// mergeMsg:
+				// Upon multiple incoming messages, discard all but the one with
+				// the shortest distance.
+				(a, b) => math.min(a, b)
+			)
+
 			// (actor, distance)
-			actor2distance = A2distanceAndLOA.flatMap(x => updateDistance(x, dist)).reduceByKey((x,y) => Math.min(x,y))
+			val actor2distance = result.vertices.map{x => (x._1, x._2._2)}
 			actor2distance.setName("rdd_actor2distance")
 			actor2distance.persist(if (compressRDDs) MEMORY_ONLY_SER else MEMORY_ONLY)
-			actorsAtDist = actor2distance.filter(x => (x._2 == dist+1))
-			countListActors.append(actorsAtDist.filter(x => x._1 >= 0).count)
-			countListActresses.append(actorsAtDist.filter(x => x._1 < 0).count)
+
+			for (dist <- 0 until Distance)
+			{
+				actorsAtDist = actor2distance.filter(x => (x._2 == dist+1))
+				countListActors.append(actorsAtDist.filter(x => x._1 >= 0).count)
+				countListActresses.append(actorsAtDist.filter(x => x._1 < 0).count)
+			}
+			actor2distance.unpersist()
+		}
+		else {
+			// (actor, actor)
+			val actor2actor = movie2ActorActor.map{case(m, (a1, a2)) => (a1, a2)}.filter(x => x._1 != x._2)
+			actor2actor.setName("rdd_actor2actor")
+			actor2actor.persist(if (compressRDDs) MEMORY_ONLY_SER else MEMORY_ONLY)
+			// (actor, actorlist)
+			// Sorting
+			val actor2listOfActors = actor2actor.groupByKey()
+			actor2listOfActors.setName("rdd_actor2listOfActors")
+			actor2listOfActors.persist(if (compressRDDs) MEMORY_ONLY_SER else MEMORY_ONLY)
+			// (actor, distance)
+			var actor2distance = actor2actor.map(x => (x._1, if (x._1 == KevinBaconID) 0 else Infinite))
+			actor2actor.unpersist()
+
+
+			for (dist <- 0 until Distance)
+			{
+				//(actor, (distance, actorlist))
+				var A2distanceAndLOA = actor2distance.join(actor2listOfActors)
+				actor2distance.unpersist()
+				// (actor, distance)
+				actor2distance = A2distanceAndLOA.flatMap(x => updateDistance(x, dist)).reduceByKey((x,y) => Math.min(x,y))
+				actor2distance.setName("rdd_actor2distance")
+				actor2distance.persist(if (compressRDDs) MEMORY_ONLY_SER else MEMORY_ONLY)
+				actorsAtDist = actor2distance.filter(x => (x._2 == dist+1))
+				countListActors.append(actorsAtDist.filter(x => x._1 >= 0).count)
+				countListActresses.append(actorsAtDist.filter(x => x._1 < 0).count)
+			}
+
 		}
 
 		val num_male_actors = actor2ListOfMovies1.filter(x => x._2 >= 0).count
@@ -229,6 +299,7 @@ object Bacon
 		// (actor_id, actor)
 		val actorID2actor = actor2ListOfMovies1.map{case((actor, ml), id) => (id, actor)}
 		// (actor_id, actor).join(actor_id, distance) -> (actor_id, (actor, distance))
+
 		val x6 = actorID2actor.join(actorsAtDist).map{x =>
 			val gender = if (x._1 >= 0) true else false
 			(x._2._1, gender)
@@ -272,12 +343,15 @@ object Bacon
 			fout.write(index + ". " + x._1 + "\n")
 		}
 		fout.close()
-		sc.stop()
 		bw.close()
 
 		val et = (System.currentTimeMillis - t0) / 1000
 		val mins = et / 60
 		val secs = et % 60
 		println( "{Time taken = %d mins %d secs}".format(mins, secs) )
+		println("Press any key to stop.")
+		System.in.read();
+		sc.stop()
+
 	}
 }
