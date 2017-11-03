@@ -7,6 +7,8 @@ libraryDependencies ++= Seq(
 	"com.github.samtools" % "htsjdk" % "1.143"
 )
 
+assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false, includeDependency = false)
+
 resourceDirectory in Compile := baseDirectory.value / "resources"
 
 mergeStrategy in assembly := {

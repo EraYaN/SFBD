@@ -51,6 +51,20 @@ object StreamingMapper
 	// 	return kvPairs
 	// }
 
+    def deleteFolder(folder: File) {
+        var files = folder.listFiles();
+        if(files!=null) { //some JVMs return null for empty dirs
+            files.foreach({ f=>
+                if(f.isDirectory()) {
+                    deleteFolder(f);
+                } else {
+                    f.delete();
+                }
+            })
+        }
+        folder.delete();
+    }
+
 	def getTimeStamp() : String =
 	{
 		return new SimpleDateFormat("HH:mm:ss").format(Calendar.getInstance().getTime())
@@ -73,7 +87,16 @@ object StreamingMapper
 		// Read the parameters from the config file //////////////////////////
 		val file =
 			if (runLocal) {
-				new File("config_local.xml")
+                if(System.getProperty("user.name")=="Erwin"){
+                    if(System.getProperty("os.name").startsWith("Windows")){
+                        new File("config_erwin.win.xml")
+                    } else {
+                        new File("config_erwin.nix.xml")
+
+                    }    				
+                } else {
+                    new File("config_robin.xml")
+                }
 			}
 			else {
 				new File("config.xml")
@@ -96,19 +119,61 @@ object StreamingMapper
 		println(s"refPath = $refPath\nbwaPath = $bwaPath\nnumTasks = $numTasks\nnumThreads = $numThreads\nintervalSecs = $intervalSecs")
 		println(s"streamDir = $streamDir\ninputDir = $inputDir\noutputDir = $outputDir")
 
-		// Create stream and output directories if they don't already exist
-		new File(streamDir).mkdirs
-		new File(outputDir).mkdirs
-		new File(tempDir).mkdirs
+		// Create and clean stream and output directories
+		val streamDirFile = new File(streamDir)
+		val outputDirFile = new File(outputDir)
+		val tempDirFile = new File(tempDir)
+
+        if(streamDirFile.exists() && streamDirFile.isDirectory()){
+            // Clean old directory
+            deleteFolder(streamDirFile)
+        }
+        streamDirFile.mkdirs
+        if(outputDirFile.exists() && outputDirFile.isDirectory()){
+            // Clean old directory
+            deleteFolder(outputDirFile)
+        }
+        outputDirFile.mkdirs
+
+        if(tempDirFile.exists() && tempDirFile.isDirectory()){
+            // Clean old directory
+            deleteFolder(tempDirFile)
+        }
+        tempDirFile.mkdirs
 		//////////////////////////////////////////////////////////////////////
 
 		sparkConf.setMaster("local[" + numTasks + "]")
 		sparkConf.set("spark.cores.max", numTasks)
-		val ssc = new StreamingContext(sparkConf, Seconds(intervalSecs))
+        val sc = new SparkContext(sparkConf)
+		val ssc = new StreamingContext(sc, Seconds(intervalSecs))
 		val filenames = ssc.textFileStream(streamDir)
+        var submittedParts : Int = 0
+        var processedParts = sc.accumulator(0)
+
+
+        sys.ShutdownHookThread {
+              println("Gracefully stopping Spark Streaming Application")
+              println("Pre-Stop Progress: %d out of %d".format(processedParts.value,submittedParts) )
+              ssc.stop(true, true)
+              println("After-Stop Progress: %d out of %d".format(processedParts.value,submittedParts) )
+              println("Application stopped")
+        }
+
 
 		if (runLocal) {
-			filenames.print()
+			filenames.foreachRDD({file =>  
+                // Here we can sort if we need to so that fastq1 is always first            
+                file.foreach({x=>
+                    println("Processing file: %s/%s".format(tempDir,x))
+                    processedParts += 1
+                    val extra_file = new PrintWriter("%s/bwamem%s.sam".format(outputDir,x.filter(_.isDigit)), "UTF-8")
+                    extra_file.println("File: %s/%s".format(tempDir,x))
+                    extra_file.close()
+                    println("Processed file: %s/%s".format(tempDir,x))
+                })
+                
+            })
+            //filenames.foreachRDD({file => val extra_file = new PrintWriter("%s.extra".format(file), "UTF-8"); extra_file.close(); })
 		}
 		else {
 			// var bwaResults = filenames.flatMap(files => bwaRun(files.getPath, bcconfig))
@@ -119,7 +184,8 @@ object StreamingMapper
 			// 		).persist(MEMORY_ONLY_SER)//cache
 			// bwaResults.setName("rdd_bwaResults")
 		}
-
+        //After all operations have been added, start the streaming.
+        ssc.start()
 		val reader1 = new fastq.FastqReader(new File(inputDir + "/fastq1.fq"))
 		val reader2 = new fastq.FastqReader(new File(inputDir + "/fastq2.fq"))
 
@@ -145,11 +211,14 @@ object StreamingMapper
 			writer.println("%s/fastq1_%04d.fq".format(tempDir, j));
 			writer.println("%s/fastq2_%04d.fq".format(tempDir, j));
 			writer.close();
-
+            submittedParts += 2
 			j += 1
 		}
 
-		ssc.start()
-		ssc.awaitTermination()
+		while(submittedParts>processedParts.value){
+            println("Waiting to exit; Progress: %d out of %d".format(processedParts.value,submittedParts) )
+            Thread.sleep(1000)
+        }
+        //ssc.stop(true, true)
 	}
 }
