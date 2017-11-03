@@ -3,7 +3,8 @@ name := "StreamingMapper"
 scalaVersion := "2.11.0"
 
 libraryDependencies ++= Seq(
-	"org.apache.spark" % "spark-streaming_2.11" % "2.0.0"
+	"org.apache.spark" % "spark-streaming_2.11" % "2.0.0",
+	"com.github.samtools" % "htsjdk" % "1.143"
 )
 
 resourceDirectory in Compile := baseDirectory.value / "resources"
