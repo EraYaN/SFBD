@@ -34,7 +34,7 @@ object VarDensity
 
 		val dbsnpLines = sc.textFile(dbsnpFile, tasks.toInt)
 		// Filter headers.
-		val dbsnp = dbsnpLines.filter(!_.startsWith("##"))
+		val dbsnp = dbsnpLines.filter(!_.startsWith("#"))
 
 		val dictLines = Source.fromFile(dictFile).getLines
 
@@ -50,7 +50,7 @@ object VarDensity
 
 		// Expand grouped records per chromosome and region to table, adding index and record count.
 		// Rdd[(chromosome: String, index: Int, region: Int, count: Int)]
-		val table = grouped.map(x => (x._1._1, chromosome2index(x._1._1), x._1._2, x._2.size))
+		val table = grouped.map(x => (x._1._1, chromosome2index(x._1._1), x._1._2, x._2.size)).sortBy(x => (x._2, x._3))
 
 		// Map table to RDD of lines.
 		// Rdd[line: String]
