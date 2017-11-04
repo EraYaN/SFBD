@@ -398,8 +398,7 @@ lab2/input
 lab2/logs
 *.gz
 
-lab3/part1/input
+lab3/part*/input
+lab3/part*/output
 lab3/part2/stream
 lab3/part2/temp
-lab3/part2/input
-lab3/part2/output
