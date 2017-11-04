@@ -12,44 +12,30 @@ import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.parsers.DocumentBuilder
 import org.w3c.dom.Document
 import htsjdk.samtools._
+import sys.process._
 
 object StreamingMapper
 {
-	final val runLocal = true
-	final val linesPerChunk = 1024
+	final val runLocal = false
+	final val linesPerChunk = 16384
 
-	// def bwaRun(x: String, bcconfig: Broadcast[Configuration]): Array[(Int, SAMRecord)] =
-	// {
-	// 	val config = bcconfig.value
-	// 	val refFolder = config.getRefFolder
-	// 	val toolsFolder = config.getToolsFolder
-	// 	val numThreads = config.getNumThreads
-	// 	val numChunks = config.getNumInstances
-	// 	val inputFolder = config.getInputFolder
-	// 	val tmpFolder = config.getTmpFolder
+	def bwaRun(inputFile: String, outputFile: String, bwaPath: String, refPath: String, numThreads: Int) : Int =
+	{
+		// Create the command string (bwa mem...)and then execute it using the Scala's process package. More help about
+		//	Scala's process package can be found at http://www.scala-lang.org/api/current/index.html#scala.sys.process.package.
 
-	// 	// Create the command string (bwa mem...)and then execute it using the Scala's process package. More help about
-	// 	//	Scala's process package can be found at http://www.scala-lang.org/api/current/index.html#scala.sys.process.package.
-
-	// 	// bwa mem refFolder/RefFileName -p -t numOfThreads fastqChunk > outFileName
-	// 	val inputFile = x
-	// 	val outFileName = tmpFolder + "bwamem" + x.filter(_.isDigit)
-	// 	println(inputFile)
-	// 	println(outFileName)
-
-	// 	val command = Seq(toolsFolder + "bwa", "mem", refFolder + RefFileName, "-p", "-t", numThreads, inputFile)
-	// 	println(command)
-	// 	command #> new File(outFileName) lines
-
-	// 	val bwaKeyValues = new BWAKeyValues(outFileName)
-	// 	bwaKeyValues.parseSam()
-	// 	val kvPairs: Array[(Int, SAMRecord)] = bwaKeyValues.getKeyValuePairs()
-
-	// 	//new File(outFileName).delete
-	// 	Seq("rm", outFileName).lines
-
-	// 	return kvPairs
-	// }
+		// bwa mem refFolder/RefFileName -p -t numOfThreads fastqChunk > outFileName
+		
+		val command = Seq(bwaPath, "mem", refPath, "-v", "2", "-p", "-t", numThreads.toString, inputFile)
+		//println(command)
+		val result = command #> new File(outputFile) !;
+        if(result==0){
+            println("BWA Mem completed succesfully for %s.".format(outputFile));
+        } else {
+            println("BWA Mem returned %d for %s.".format(result, outputFile));
+        }
+		return result
+	}
 
     def deleteFolder(folder: File) {
         var files = folder.listFiles();
@@ -108,8 +94,8 @@ object StreamingMapper
 
 		val refPath = getTagValue(document, "refPath")
 		val bwaPath = getTagValue(document, "bwaPath")
-		val numTasks = getTagValue(document, "numTasks")
-		val numThreads = getTagValue(document, "numThreads")
+		val numTasks = getTagValue(document, "numTasks").toInt
+		val numThreads = getTagValue(document, "numThreads").toInt
 		val intervalSecs = getTagValue(document, "intervalSecs").toInt
 		val streamDir = getTagValue(document, "streamDir")
 		val inputDir = getTagValue(document, "inputDir")
@@ -142,20 +128,20 @@ object StreamingMapper
         tempDirFile.mkdirs
 		//////////////////////////////////////////////////////////////////////
 
-		sparkConf.setMaster("local[" + numTasks + "]")
-		sparkConf.set("spark.cores.max", numTasks)
+		sparkConf.setMaster("local[" + numTasks.toString + "]")
+		sparkConf.set("spark.cores.max", numTasks.toString)
         val sc = new SparkContext(sparkConf)
 		val ssc = new StreamingContext(sc, Seconds(intervalSecs))
 		val filenames = ssc.textFileStream(streamDir)
         var submittedParts : Int = 0
         var processedParts = sc.accumulator(0)
-
+        var successfulParts = sc.accumulator(0)
 
         sys.ShutdownHookThread {
               println("Gracefully stopping Spark Streaming Application")
-              println("Pre-Stop Progress: %d out of %d".format(processedParts.value,submittedParts) )
+              println("Pre-Stop Progress: %d out of %d. %d were successful.".format(processedParts.value,submittedParts,successfulParts.value) )
               ssc.stop(true, true)
-              println("After-Stop Progress: %d out of %d".format(processedParts.value,submittedParts) )
+              println("After-Stop Progress: %d out of %d. %d were successful.".format(processedParts.value,submittedParts,successfulParts.value) )
               println("Application stopped")
         }
 
@@ -164,11 +150,12 @@ object StreamingMapper
 			filenames.foreachRDD({file =>  
                 // Here we can sort if we need to so that fastq1 is always first            
                 file.foreach({x=>
-                    println("Processing file: %s/%s".format(tempDir,x))
-                    processedParts += 1
+                    println("Processing file: %s/%s".format(tempDir,x))                   
                     val extra_file = new PrintWriter("%s/bwamem%s.sam".format(outputDir,x.filter(_.isDigit)), "UTF-8")
                     extra_file.println("File: %s/%s".format(tempDir,x))
                     extra_file.close()
+                    processedParts += 1
+                    successfulParts += 1
                     println("Processed file: %s/%s".format(tempDir,x))
                 })
                 
@@ -176,13 +163,23 @@ object StreamingMapper
             //filenames.foreachRDD({file => val extra_file = new PrintWriter("%s.extra".format(file), "UTF-8"); extra_file.close(); })
 		}
 		else {
-			// var bwaResults = filenames.flatMap(files => bwaRun(files.getPath, bcconfig))
-			// 		.combineByKey(
-			// 			(sam: SAMRecord) => Array(sam),
-			// 			(acc: Array[SAMRecord], value: SAMRecord) => (acc :+ value),
-			// 			(acc1: Array[SAMRecord], acc2: Array[SAMRecord]) => (acc1 ++ acc2)
-			// 		).persist(MEMORY_ONLY_SER)//cache
-			// bwaResults.setName("rdd_bwaResults")
+            filenames.foreachRDD({file =>  
+                // Here we can sort if we need to so that fastq1 is always first            
+                file.foreach({x=>
+                    println("Remote: Processing file: %s/%s".format(tempDir,x))                    
+                    //val extra_file = new PrintWriter("%s/bwamem%s.sam".format(outputDir,x.filter(_.isDigit)), "UTF-8")
+                    //extra_file.println("File: %s/%s".format(tempDir,x))
+                    //extra_file.close()
+                    if(bwaRun("%s/%s".format(tempDir,x),"%s/bwamem%s.sam".format(outputDir,x.filter(_.isDigit)), bwaPath, refPath, numThreads)==0){
+                        successfulParts += 1
+                    }
+
+                    processedParts += 1
+                    println("Remote: Processed file: %s/%s".format(tempDir,x))
+                })
+                
+            })
+			// var bwaResults = filenames.flatMap(files => bwaRun(files.getPath, bcconfig)).collect
 		}
         //After all operations have been added, start the streaming.
         ssc.start()
@@ -192,31 +189,35 @@ object StreamingMapper
 		var j = 0
 		val factory = new fastq.FastqWriterFactory()
 
-		while(reader1.hasNext()) {
+		while(reader1.hasNext() && reader2.hasNext()) {
 			var i = 0
-			val writer1 = factory.newWriter(new File("%s/fastq1_%04d.fq".format(tempDir, j)))
-			val writer2 = factory.newWriter(new File("%s/fastq2_%04d.fq".format(tempDir, j)))
+			val writer1 = factory.newWriter(new File("%s/fastq_%04d.fq".format(tempDir, j)))
+			//val writer2 = factory.newWriter(new File("%s/fastq2_%04d.fq".format(tempDir, j)))
 
-			while (i < linesPerChunk && reader1.hasNext()) {
-				writer1.write(reader1.next())
-				writer2.write(reader2.next())
-
-				i += 1
+            var counter : Int = 0
+			while (i < linesPerChunk && ((i%2==0 && reader1.hasNext()) || (i%2==1 && reader2.hasNext()))) {                
+                if(i%2==0){
+                    writer1.write(reader1.next())
+                    i += 1
+                } else {
+                    writer1.write(reader2.next())
+                    i += 1
+                }
 			}
 
 			writer1.close()
-			writer2.close()
+			//writer2.close()
 
 			val writer = new PrintWriter("%s/files_%04d.txt".format(streamDir, j), "UTF-8");
-			writer.println("%s/fastq1_%04d.fq".format(tempDir, j));
-			writer.println("%s/fastq2_%04d.fq".format(tempDir, j));
+			writer.println("fastq_%04d.fq".format(j));
+			//writer.println("fastq2_%04d.fq".format(j));
 			writer.close();
-            submittedParts += 2
+            submittedParts += 1
 			j += 1
 		}
 
 		while(submittedParts>processedParts.value){
-            println("Waiting to exit; Progress: %d out of %d".format(processedParts.value,submittedParts) )
+            println("Waiting to exit; Progress: %d out of %d. %d were successful.".format(processedParts.value,submittedParts,successfulParts.value))
             Thread.sleep(1000)
         }
         //ssc.stop(true, true)
