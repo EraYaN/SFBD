@@ -46,6 +46,7 @@ object VarDensity
 		// Group all records by chromosome and region.
 		// Rdd[(chromosome: String, region: Int, variants: CompactBuffer(Array(chromosome: String, position: Int)))]
 		val grouped = dbsnp.map(_.split("\t").take(2)).groupBy(x => (x(0), math.floor(x(1).toInt / regionSize).toInt + 1))
+		grouped.persist(MEMORY_ONLY)
 
 		// Expand grouped records per chromosome and region to table, adding index and record count.
 		// Rdd[(chromosome: String, index: Int, region: Int, count: Int)]
