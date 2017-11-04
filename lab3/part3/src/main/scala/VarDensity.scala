@@ -8,12 +8,22 @@ import org.apache.spark.storage.StorageLevel._
 import org.apache.log4j.Logger
 import org.apache.log4j.Level
 import scala.io.Source
-import java.io.PrintWriter
+import java.io._
+import java.text.DateFormat
+import java.text.SimpleDateFormat
+import java.util.Calendar
 
 object VarDensity
 {
-	final val compressRDDs = true
+	final val compressRDDs = false
 	final val regionSize = 1e6
+
+	val bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream("sparkLog.txt"), "UTF-8"))
+
+	def getTimeStamp() : String =
+	{
+		return "[" + new SimpleDateFormat("HH:mm:ss").format(Calendar.getInstance().getTime()) + "] "
+	}
 
 	def main(args: Array[String])
 	{
@@ -29,6 +39,36 @@ object VarDensity
 		if (compressRDDs)
 			conf.set("spark.rdd.compress", "true")
 		val sc = new SparkContext(conf)
+
+		sc.addSparkListener(new SparkListener()
+		{
+			override def onApplicationStart(applicationStart: SparkListenerApplicationStart)
+			{
+				bw.write(getTimeStamp() + " Spark ApplicationStart: " + applicationStart.appName + "\n");
+				bw.flush
+			}
+
+			override def onApplicationEnd(applicationEnd: SparkListenerApplicationEnd)
+			{
+				bw.write(getTimeStamp() + " Spark ApplicationEnd: " + applicationEnd.time + "\n");
+				bw.flush
+			}
+
+			override def onStageCompleted(stageCompleted: SparkListenerStageCompleted)
+			{
+				val map = stageCompleted.stageInfo.rddInfos
+				map.foreach(row => {
+					if (row.isCached)
+					{
+						bw.write(getTimeStamp() + row.name + ": memsize = " + (row.memSize / 1000000) + "MB, rdd diskSize " +
+							row.diskSize + ", numPartitions = " + row.numPartitions + "-" + row.numCachedPartitions + "\n");
+					}
+					else if (row.name.contains("rdd_"))
+						bw.write(getTimeStamp() + row.name + " processed!\n");
+					bw.flush
+				})
+			}
+		});
 
 		val t0 = System.currentTimeMillis
 
@@ -46,15 +86,18 @@ object VarDensity
 		// Group all records by chromosome and region.
 		// Rdd[(chromosome: String, region: Int, variants: CompactBuffer(Array(chromosome: String, position: Int)))]
 		val grouped = dbsnp.map(_.split("\t").take(2)).groupBy(x => (x(0), math.floor(x(1).toInt / regionSize).toInt + 1))
-		grouped.persist(MEMORY_ONLY)
+		grouped.persist(if (compressRDDs) MEMORY_ONLY_SER else MEMORY_ONLY)
+		grouped.setName("rdd_grouped")
 
 		// Expand grouped records per chromosome and region to table, adding index and record count.
 		// Rdd[(chromosome: String, index: Int, region: Int, count: Int)]
 		val table = grouped.map(x => (x._1._1, chromosome2index(x._1._1), x._1._2, x._2.size)).sortBy(x => (x._2, x._3))
+		table.setName("rdd_table")
 
 		// Map table to RDD of lines.
 		// Rdd[line: String]
 		val lines = table.map(_.productIterator.mkString("\t"))
+		lines.setName("rdd_lines")
 
 		// Write to text file.
 		val writer = new PrintWriter("output/vardensity.txt")
