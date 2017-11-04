@@ -1,0 +1,5 @@
+[20:33:52] rdd_grouped: memsize = 373MB, rdd diskSize 0, numPartitions = 322-322
+[20:34:02] rdd_grouped processed!
+[20:34:02] rdd_lines processed!
+[20:34:02] rdd_table processed!
+[20:34:03]  Spark ApplicationEnd: 1509824043005

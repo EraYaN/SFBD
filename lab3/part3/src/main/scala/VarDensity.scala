@@ -15,7 +15,7 @@ import java.util.Calendar
 
 object VarDensity
 {
-	final val compressRDDs = false
+	final val compressRDDs = true
 	final val regionSize = 1e6
 
 	val bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream("sparkLog.txt"), "UTF-8"))
