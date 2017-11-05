@@ -27,8 +27,8 @@ object Bacon
 	final val KevinBacon = "Bacon, Kevin (I)"	// This is how Kevin Bacon's name appears in the actors.list file
 	final val Infinite = 100
 	final val Distance = 6
-	final val compressRDDs = false
-	final val useGraphX = false
+	final val compressRDDs = true
+	final val useGraphX = true
 
 	val bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream("sparkLog.txt"), "UTF-8"))
 
@@ -200,6 +200,9 @@ object Bacon
 		var dist = 0
 		var actorsAtDist: RDD[(Long, Int)] = null
 
+		///////////////////////////////////////////////////
+		// Start of custom code for assignment 3 part 1. //
+		///////////////////////////////////////////////////
 		if (useGraphX) {
 			// Construct vertices as (id, (name, distance)).
 			// The initial distance for Kevin Bacon is 0 and 'Infinite' for others.
@@ -213,6 +216,7 @@ object Bacon
 					}
 				}
 			}
+
 			// Construct edges as (id_actor1, id_actor2, collaboration)).
 			val collabs: RDD[Edge[String]] = movie2ActorActor.map{case(movie, (a1, a2)) => Edge(a1, a2, movie)}
 
@@ -259,6 +263,9 @@ object Bacon
 			}
 			actor2distance.unpersist()
 		}
+		/////////////////////////////////////////////////
+		// End of custom code for assignment 3 part 1. //
+		/////////////////////////////////////////////////
 		else {
 			// (actor, actor)
 			val actor2actor = movie2ActorActor.map{case(m, (a1, a2)) => (a1, a2)}.filter(x => x._1 != x._2)
