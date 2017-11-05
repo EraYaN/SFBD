@@ -271,16 +271,16 @@ def deleteFolder(folder: File) {
     folder.delete();
 }
 
-def loadBalancer(weights: Array[(Int, Int)], vardensity: Array[(Int,(String,Int,Int))], numTasks: Int): ArrayBuffer[ArrayBuffer[Int]] = 
+def loadBalancer(weights: Array[(Int, Int)], vardensity: Array[(Int,(String,Int,Int))], numTasks: Int): ArrayBuffer[ArrayBuffer[(Int,Int)]] = 
 {
-	var results = ArrayBuffer.fill(numTasks)(ArrayBuffer[(String,Int,Int)]())
+	var results = ArrayBuffer.fill(numTasks)(ArrayBuffer[(Int,Int)]())
 	var sizes = ArrayBuffer.fill(numTasks)(0)
 
 
 	for ((density, (chromosome,chromosomeIdx,partIdx)) <- vardensity.sorted.reverse) {
 	  val region = sizes.zipWithIndex.min._2
 	  sizes(region) += density
-	  results(region) += (chromosome,chromosomeIdx,partIdx)
+	  results(region) += ((chromosomeIdx,partIdx))
 	}
 	results
 }
@@ -562,8 +562,8 @@ def main(args: Array[String])
 	val loadMap = loadBalancer(loadPerChromosome, vardesity, numRegions)
 	
 	val loadBalancedRdd = bwaResults.map {
-	  case (key, values) =>
-		(loadMap.indexWhere((a: ArrayBuffer[(String,Int,Int))]) => a.contains(key)), values)
+	  case (key, values) => // First int is key second is part number
+		(loadMap.indexWhere((a: ArrayBuffer[(Int,Int)]) => a.count({ case (chromosomeIdx, partIdx) => chromosomeIdx==key}) > 1 ), values)
 	}.reduceByKey(_ ++ _)
 	loadBalancedRdd.setName("rdd_loadBalancedRdd")
 
