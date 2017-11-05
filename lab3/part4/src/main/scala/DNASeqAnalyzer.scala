@@ -271,19 +271,6 @@ def deleteFolder(folder: File) {
     folder.delete();
 }
 
-def loadBalancer(weights: Array[(Int, Int)], vardensity: Array[(Int,(String,Int,Int))], numTasks: Int): ArrayBuffer[ArrayBuffer[(Int,Int)]] = 
-{
-	var results = ArrayBuffer.fill(numTasks)(ArrayBuffer[(Int,Int)]())
-	var sizes = ArrayBuffer.fill(numTasks)(0)
-
-
-	for ((density, (chromosome,chromosomeIdx,partIdx)) <- vardensity.sorted.reverse) {
-	  val region = sizes.zipWithIndex.min._2
-	  sizes(region) += density
-	  results(region) += ((chromosomeIdx,partIdx))
-	}
-	results
-}
 
 def getTimeStamp() : String =
 {
@@ -554,19 +541,96 @@ def main(args: Array[String])
 	  ).persist(MEMORY_ONLY_SER)//cache
 	bwaResults.setName("rdd_bwaResults")
 
+    val vardensity_rdd = sc.textFile("output/vardensity.txt").map(line => line.split("\t")).map(array => (Integer.parseInt(array(3)),(array(0), Integer.parseInt(array(1)), Integer.parseInt(array(2)))))
+    val vardensity = vardensity_rdd.collect
+    val chromosomeSizesArray = vardensity_rdd.map(x=>(x._2._2,x._2._1)).distinct().map(x=>(x._1,config.getDict.getSequence(x._2).getSequenceLength))
 
-    val vardesity_rdd = sc.textFile("output/vardensity.txt").map(line => line.split("\t")).map(array => (Integer.parseInt(array(3)),(array(0), Integer.parseInt(array(1)), Integer.parseInt(array(2)))))
-    val vardesity = vardesity_rdd.collect
 
-	var loadPerChromosome = bwaResults.map { case (key, values) => (values.length, key) }.collect
-	val loadMap = loadBalancer(loadPerChromosome, vardesity, numRegions)
+    //chromosomeSizesArray.foreach(x=>println("Chromosome Size; Key: %d; Size: %d".format(x._1,x._2)))
+	//var loadPerChromosome = bwaResults.map { case (key, values) => (values.length, key) }.collect
+	//val loadMap = loadBalancer(loadPerChromosome, vardensity, numRegions)
 	
+    val variantcount = vardensity_rdd.map(x=>x._1).sum()
+
+    val variantsPerRegion = math.ceil(variantcount/numRegions)
+
+    var regions = ArrayBuffer[(Int,Double,Double)]()
+    var region : Int = 0
+    var position : Double = 0
+    var size : Int = 0
+    var regionParts : Int = 0
+    val partSize : Double = 1e6
+
+   
+
+    for ((density, (chromosome,chromosomeIdx,partIdx)) <- vardensity) {
+      if(size>variantsPerRegion){        
+        regions += ((region,position,position+regionParts*partSize))
+        
+        position = position+regionParts*partSize
+        region += 1
+        size = 0        
+        regionParts = 0
+      }
+      size += density
+      regionParts += 1
+    }
+
+    for ((region, start, end) <- regions) {
+      println("Region: %d; Start: %f; End: %f".format(region, start, end))
+    }
+    println("Total variants found: %f, Varaints per region: %f".format(variantcount,variantsPerRegion))
+    
+    //loadBalancer(loadPerChromosome, vardensity, numRegions)    
+    
+    val chromosomeSizes : HashMap[Int,Double] = new HashMap[Int,Double]()
+    //var currentOffset : Double = 0
+
+    for((chronosomeName, chromosomeLength) <- chromosomeSizesArray.collect()){
+        val previousChromosomes = chromosomeSizesArray.filter(x=>x._1 < chronosomeName).map(x=>x._2.toDouble)
+        var offset : Double = 0 
+        if(previousChromosomes.count() > 0){
+            offset = previousChromosomes.reduce(_+_)
+        }
+
+        chromosomeSizes += (chronosomeName -> offset)
+        println("Chromosome Key: %d; Offset: %f".format(chronosomeName,offset))
+        //currentOffset += chromosomeLength
+    }
+    //println("Test Chromosome length for 11: %f".format(chromosomeSizes(11)))
+    val loadBalancedRdd = bwaResults.flatMap{
+        x => 
+        x._2.map(
+            y=>(x._1,y)
+        )}
+    //.sortBy(z=>(z._1,z._2.getAlignmentStart),true,16)
+    .map{
+        x=>{
+        val position = x._2.getAlignmentStart + chromosomeSizes(x._1)
+        val region = regions.find(y=> position > y._2 && position < y._3) match {
+                case Some((region, start, end)) => region
+                case None => numRegions-1 //throw the rest in the last region (smallest one)
+            }
+        //println("Put position %d in region %d.".format(position,region))
+        (region,x._2)
+    }
+    }
+    .combineByKey(
+        (sam: SAMRecord) => Array(sam),
+        (acc: Array[SAMRecord], value: SAMRecord) => (acc :+ value),
+        (acc1: Array[SAMRecord], acc2: Array[SAMRecord]) => (acc1 ++ acc2)
+      )
+    loadBalancedRdd.setName("rdd_loadBalancedRdd")
+    /*val preLoadBalancedRdd = sc.parallelize(ArrayBuffer.fill(numRegions)(ArrayBuffer[(Int,SAMRecord)]()))
+
 	val loadBalancedRdd = bwaResults.map {
 	  case (key, values) => // First int is key second is part number
 		(loadMap.indexWhere((a: ArrayBuffer[(Int,Int)]) => a.count({ case (chromosomeIdx, partIdx) => chromosomeIdx==key}) > 1 ), values)
 	}.reduceByKey(_ ++ _)
-	loadBalancedRdd.setName("rdd_loadBalancedRdd")
-
+	loadBalancedRdd.setName("rdd_loadBalancedRdd")*/  
+    //var counts = loadBalancedRdd.flatMap(x=>x._2.map(y=>(x._1,1))).reduceByKey(_+_)  
+    //loadBalancedRdd.foreach(x=>println("Region: %d; Size: %d".format(x._1,x._2.length)))  
+    
 	val variantCallData = loadBalancedRdd
 	  .flatMap { case (key: Int, sams: Array[SAMRecord]) => variantCall(key, sams, bcconfig, bc_stdErrCleanSam, bc_stdErrMarkDuplicates, bc_stdErrAddOrReplaceReadGroups, bc_stdErrBuildBamIndex, bc_stdErrIntersect, bc_stdErrRealignerTargetCreator, bc_stdErrIndelRealigner, bc_stdErrBaseRecalibrator, bc_stdErrPrintReads, bc_stdErrHaplotypeCaller,
       bc_stdOutCleanSam, bc_stdOutMarkDuplicates, bc_stdOutAddOrReplaceReadGroups, bc_stdOutBuildBamIndex, bc_stdOutIntersect, bc_stdOutRealignerTargetCreator, bc_stdOutIndelRealigner, bc_stdOutBaseRecalibrator, bc_stdOutPrintReads, bc_stdOutHaplotypeCaller) }
