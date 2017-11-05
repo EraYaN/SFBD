@@ -22,6 +22,7 @@ package tudelft.utils;
 
 import htsjdk.samtools.*;
 import java.io.File;
+import java.io.FileNotFoundException;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.DocumentBuilder;
 import org.w3c.dom.Document;
@@ -36,27 +37,33 @@ public class Configuration implements Serializable
 	private String inputFolder;
 	private String outputFolder;
 	private String numInstances;
+	private String numRegions;
 	private String numThreads;
 	private double scc;
 	private double sec;
 	private SAMSequenceDictionary dict;
 	private Long startTime;
 	
-	public void initialize()
+	public void initialize(String filename)
 	{	
 		try
 		{
-			File file = new File("config.xml");
+			File file = new File(filename);
+			if(!file.exists()){
+				System.err.println("Config file " +  filename + ", does not exist.");
+				throw new FileNotFoundException("Could not find file: " +  filename);
+			}
 			DocumentBuilderFactory documentBuilderFactory = DocumentBuilderFactory.newInstance();
 			DocumentBuilder documentBuilder = documentBuilderFactory.newDocumentBuilder();
 			Document document = documentBuilder.parse(file);
-			
+			System.out.println("Root configuration element: " + document.getDocumentElement().getNodeName());
 			refFolder = correctFolderName(document.getElementsByTagName("refFolder").item(0).getTextContent());
 			toolsFolder = correctFolderName(document.getElementsByTagName("toolsFolder").item(0).getTextContent());
 			tmpFolder = correctFolderName(document.getElementsByTagName("tmpFolder").item(0).getTextContent());
 			inputFolder = correctFolderName(document.getElementsByTagName("inputFolder").item(0).getTextContent());
 			outputFolder = correctFolderName(document.getElementsByTagName("outputFolder").item(0).getTextContent());
 			numInstances = document.getElementsByTagName("numInstances").item(0).getTextContent();
+			numRegions = document.getElementsByTagName("numRegions").item(0).getTextContent();
 			numThreads = document.getElementsByTagName("numThreads").item(0).getTextContent();
 
 			scc						= 30.0;
@@ -120,6 +127,11 @@ public class Configuration implements Serializable
 	{
 		return numInstances;
 	}
+
+	public String getNumRegions()
+	{
+		return numRegions;
+	}
 	
 	public String getNumThreads()
 	{
@@ -129,6 +141,11 @@ public class Configuration implements Serializable
 	public void setNumInstances(String numInstances)
 	{
 		this.numInstances = numInstances;
+	}
+
+	public void setNumRegions(String numRegions)
+	{
+		this.numRegions = numRegions;
 	}
 	
 	public void setNumThreads(String numThreads)
