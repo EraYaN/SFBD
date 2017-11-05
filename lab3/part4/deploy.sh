@@ -3,7 +3,8 @@ echo "Assembling main JAR... (WSL)"
 cmd.exe /C sbt package || exit 1
 echo "Creating remote directory...."
 ssh erdehaan@kova-01.ewi.tudelft.nl 'mkdir -p ~/sfbd' || exit 1
-ssh erdehaan@kova-01.ewi.tudelft.nl 'mkdir -p ~/sfbd/output' || exit 1
+echo "Deploying config...."
+rsync -utRz --progress config.xml erdehaan@kova-01.ewi.tudelft.nl:~/sfbd/config.xml || exit 1
 echo "Deploying JARs...."
 rsync -utRz --include="*.jar" --exclude="*" --progress ./target/scala-2.11/* erdehaan@kova-01.ewi.tudelft.nl:~/sfbd || exit 1
 echo "Running Application...."
